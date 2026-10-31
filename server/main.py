@@ -1,0 +1,390 @@
+import asyncio
+import os
+import secrets
+import sys
+from contextlib import asynccontextmanager
+from pathlib import Path
+from urllib.parse import quote
+
+import httpx
+from fastapi import (Depends, FastAPI, File, Form, Header, HTTPException, Request,
+                     Response, UploadFile, WebSocket, WebSocketDisconnect)
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from common import formats  # noqa: E402
+from server import db  # noqa: E402
+from server import images as imgmod  # noqa: E402
+from server import net  # noqa: E402
+from server import push  # noqa: E402
+
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+BOT_USERNAME = os.environ.get("BOT_USERNAME", "your_bot")
+SECRET_KEY = os.environ.get("SECRET_KEY", "change-me")
+APP_VERSION = os.environ.get("APP_LATEST_VERSION", "0.1.0")
+APP_DOWNLOAD_URL = os.environ.get("APP_DOWNLOAD_URL", "")
+APK_PATH = os.environ.get("APK_PATH", "")          # путь к APK на сервере — тогда /download отдаёт его сам
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")  # https://домен — для ссылки на APK в проверке обновлений
+MTX_PART_BYTES = int(os.environ.get("MTX_PART_KB", "32")) * 1024  # вес одной части текста в .mtx
+AUTH_TTL = 600
+
+templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+
+# ───────────── Telegram-бот (long polling, без доп. зависимостей) ─────────────
+async def tg_call(client: httpx.AsyncClient, method: str, **params):
+    r = await client.post(f"https://api.telegram.org/bot{BOT_TOKEN}/{method}", json=params, timeout=65)
+    return r.json()
+
+
+async def run_bot():
+    if not BOT_TOKEN:
+        print("BOT_TOKEN не задан — вход через Telegram отключён")
+        return
+    offset = 0
+    try:
+        client, _ = net.make_client(httpx.Timeout(65.0))
+    except net.ProxyError as e:
+        print("Бот не запущен:", e)
+        return
+    async with client:
+        while True:
+            try:
+                res = await tg_call(client, "getUpdates", offset=offset, timeout=50)
+                for upd in res.get("result", []):
+                    offset = upd["update_id"] + 1
+                    msg = upd.get("message") or {}
+                    text = msg.get("text", "")
+                    if not text.startswith("/start "):
+                        if text.startswith("/start"):
+                            await tg_call(client, "sendMessage", chat_id=msg["chat"]["id"],
+                                          text="Откройте приложение и нажмите «Войти через Telegram».")
+                        continue
+                    token = text.split(maxsplit=1)[1].strip()
+                    u = msg["from"]
+                    ok = confirm_auth(token, u["id"], u.get("username"),
+                                      " ".join(filter(None, [u.get("first_name"), u.get("last_name")])))
+                    await tg_call(client, "sendMessage", chat_id=msg["chat"]["id"],
+                                  text="✅ Готово, вернитесь в приложение." if ok
+                                  else "Ссылка устарела. Повторите вход в приложении.")
+            except Exception as e:  # сеть моргнула — не падаем
+                print("bot error:", e)
+                await asyncio.sleep(5)
+
+
+def confirm_auth(token: str, tg_id: int, username: str | None, name: str) -> bool:
+    with db.conn() as c:
+        row = c.execute("SELECT * FROM auth_requests WHERE token=? AND tg_id IS NULL AND created>?",
+                        (token, db.now() - AUTH_TTL)).fetchone()
+        if not row:
+            return False
+        c.execute("UPDATE auth_requests SET tg_id=? WHERE token=?", (tg_id, token))
+        c.execute("INSERT INTO users(tg_id, username, name) VALUES(?,?,?) "
+                  "ON CONFLICT(tg_id) DO UPDATE SET username=excluded.username, name=excluded.name",
+                  (tg_id, username, name or username or str(tg_id)))
+    return True
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    db.init()
+    task = asyncio.create_task(run_bot())
+    yield
+    task.cancel()
+
+
+app = FastAPI(title="AlyaNovel", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, same_site="strict",
+                   https_only=os.environ.get("HTTPS_ONLY", "0") == "1", max_age=8 * 3600)
+
+
+# ───────────── Публичный API ─────────────
+@app.get("/api/{kind}/volumes")
+def list_volumes(kind: str):
+    if kind not in ("manga", "ranobe"):
+        raise HTTPException(404)
+    with db.conn() as c:
+        vols = c.execute("SELECT * FROM volumes WHERE kind=? ORDER BY number", (kind,)).fetchall()
+        out = []
+        for v in vols:
+            chs = c.execute("SELECT id, type, number, title, fmt, size, created FROM chapters "
+                            f"WHERE volume_id=? ORDER BY {db.ORDER_SQL}", (v["id"],)).fetchall()
+            if chs:  # пустые тома клиенту не показываем
+                out.append({"id": v["id"], "number": v["number"], "title": v["title"],
+                            "chapters": [dict(ch) for ch in chs]})
+    return out
+
+
+@app.get("/api/chapters/{chapter_id}/file")
+def chapter_file(chapter_id: int):
+    with db.conn() as c:
+        row = c.execute("SELECT c.fmt, c.path, c.type, c.number, v.kind, v.number AS volume "
+                        "FROM chapters c JOIN volumes v ON v.id=c.volume_id WHERE c.id=?", (chapter_id,)).fetchone()
+    if not row:
+        raise HTTPException(404)
+    try:
+        full = db.chapter_file_path(row["path"])
+    except ValueError:
+        raise HTTPException(404)
+    if not os.path.exists(full):
+        raise HTTPException(404, "Файл главы не найден на диске")
+    code = formats.chapter_code(row["kind"], row["volume"], row["type"], row["number"])  # R01-P, R01-C03, R01-A02…
+    return FileResponse(full, media_type="application/octet-stream", filename=f"{code}.{row['fmt']}")
+
+
+@app.get("/api/app-version")
+def app_version():
+    url = APP_DOWNLOAD_URL or (f"{PUBLIC_URL}/download" if PUBLIC_URL and apk_file() else "")
+    return {"latest": APP_VERSION, "url": url}
+
+
+@app.get("/api/latest")
+def latest(since: int = 0):
+    """Для уведомлений о новых главах."""
+    with db.conn() as c:
+        rows = c.execute("SELECT c.id, c.type, c.number, c.title, c.created, v.kind, v.number AS volume "
+                         "FROM chapters c JOIN volumes v ON v.id=c.volume_id "
+                         "WHERE c.created>? ORDER BY c.created", (since,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ───────────── Вход через Telegram ─────────────
+@app.post("/api/auth/start")
+def auth_start():
+    token = secrets.token_urlsafe(24)
+    with db.conn() as c:
+        c.execute("DELETE FROM auth_requests WHERE created<?", (db.now() - AUTH_TTL,))
+        c.execute("INSERT INTO auth_requests(token, created) VALUES(?,?)", (token, db.now()))
+    return {"token": token, "url": f"https://t.me/{BOT_USERNAME}?start={token}"}
+
+
+@app.get("/api/auth/poll/{token}")
+def auth_poll(token: str):
+    with db.conn() as c:
+        row = c.execute("SELECT tg_id FROM auth_requests WHERE token=? AND created>?",
+                        (token, db.now() - AUTH_TTL)).fetchone()
+        if not row:
+            raise HTTPException(410, "expired")
+        if row["tg_id"] is None:
+            return {"status": "pending"}
+        c.execute("DELETE FROM auth_requests WHERE token=?", (token,))
+        session = secrets.token_urlsafe(32)
+        c.execute("INSERT INTO sessions(token, tg_id, created) VALUES(?,?,?)", (session, row["tg_id"], db.now()))
+        user = c.execute("SELECT name FROM users WHERE tg_id=?", (row["tg_id"],)).fetchone()
+    return {"status": "ok", "session": session, "name": user["name"]}
+
+
+def current_user(authorization: str = Header(default="")):
+    token = authorization.removeprefix("Bearer ").strip()
+    with db.conn() as c:
+        row = c.execute("SELECT u.tg_id, u.name FROM sessions s JOIN users u USING(tg_id) WHERE s.token=?",
+                        (token,)).fetchone()
+    if not row:
+        raise HTTPException(401)
+    return dict(row)
+
+
+# ───────────── Чат ─────────────
+class Hub:
+    def __init__(self):
+        self.clients: set[WebSocket] = set()
+
+    async def broadcast(self, payload: dict):
+        for ws in list(self.clients):
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                self.clients.discard(ws)
+
+
+hub = Hub()
+
+
+@app.get("/api/chat/messages")
+def chat_history(limit: int = 50, user=Depends(current_user)):
+    with db.conn() as c:
+        rows = c.execute("SELECT id, name, text, created FROM messages ORDER BY id DESC LIMIT ?",
+                         (min(limit, 200),)).fetchall()
+    return [dict(r) for r in reversed(rows)]
+
+
+@app.websocket("/ws/chat")
+async def chat_ws(ws: WebSocket, token: str = ""):
+    with db.conn() as c:
+        row = c.execute("SELECT u.tg_id, u.name FROM sessions s JOIN users u USING(tg_id) WHERE s.token=?",
+                        (token,)).fetchone()
+    if not row:
+        await ws.close(code=4401)
+        return
+    await ws.accept()
+    hub.clients.add(ws)
+    try:
+        while True:
+            text = (await ws.receive_text()).strip()[:2000]
+            if not text:
+                continue
+            with db.conn() as c:
+                cur = c.execute("INSERT INTO messages(tg_id, name, text, created) VALUES(?,?,?,?)",
+                                (row["tg_id"], row["name"], text, db.now()))
+            await hub.broadcast({"id": cur.lastrowid, "name": row["name"], "text": text, "created": db.now()})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        hub.clients.discard(ws)
+
+
+# ───────────── Сайт администратора ─────────────
+def need_admin(request: Request):
+    if not request.session.get("admin"):
+        raise HTTPException(303, headers={"Location": "/admin/login"})
+
+
+@app.get("/admin/login", response_class=HTMLResponse)
+def login_page(request: Request):
+    return templates.TemplateResponse(request, "login.html", {"error": None})
+
+
+@app.post("/admin/login")
+def login(request: Request, login: str = Form(), password: str = Form()):
+    with db.conn() as c:
+        row = c.execute("SELECT pwhash FROM admins WHERE login=?", (login,)).fetchone()
+    if not row or not db.check_pw(password, row["pwhash"]):
+        return templates.TemplateResponse(request, "login.html", {"error": "Неверный логин или пароль"}, 401)
+    request.session["admin"] = login
+    return RedirectResponse("/admin", 303)
+
+
+@app.post("/admin/logout")
+def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse("/admin/login", 303)
+
+
+@app.get("/admin", response_class=HTMLResponse, dependencies=[Depends(need_admin)])
+def admin_home(request: Request, msg: str = ""):
+    with db.conn() as c:
+        vols = [dict(v) for v in c.execute("SELECT * FROM volumes ORDER BY kind, number")]
+        for v in vols:
+            v["chapters"] = [dict(r) for r in c.execute(
+                f"SELECT id, type, number, title, fmt, size FROM chapters WHERE volume_id=? ORDER BY {db.ORDER_SQL}", (v["id"],))]
+            for r in v["chapters"]:
+                r["code"] = formats.chapter_code(v["kind"], v["number"], r["type"], r["number"])
+    return templates.TemplateResponse(request, "admin.html", {"vols": vols, "msg": msg})
+
+
+@app.post("/admin/volumes", dependencies=[Depends(need_admin)])
+def volume_create(kind: str = Form(), number: int = Form(), title: str = Form("")):
+    with db.conn() as c:
+        c.execute("INSERT OR IGNORE INTO volumes(kind, number, title) VALUES(?,?,?)", (kind, number, title))
+    return RedirectResponse("/admin", 303)
+
+
+@app.post("/admin/volumes/{vid}/delete", dependencies=[Depends(need_admin)])
+def volume_delete(vid: int):
+    with db.conn() as c:
+        paths = [r["path"] for r in c.execute("SELECT path FROM chapters WHERE volume_id=?", (vid,))]
+        c.execute("DELETE FROM volumes WHERE id=?", (vid,))
+    db.delete_chapter_files(paths)
+    return RedirectResponse("/admin?msg=Том+удалён", 303)
+
+
+@app.post("/admin/chapters", dependencies=[Depends(need_admin)])
+async def chapter_create(volume_id: int = Form(), number: str = Form(""), chapter_type: str = Form("chapter"),
+                         title: str = Form(""), text: str = Form(""), direction: str = Form("rtl"),
+                         images: list[UploadFile] = File(default=[])):
+    with db.conn() as c:
+        vol = c.execute("SELECT * FROM volumes WHERE id=?", (volume_id,)).fetchone()
+    if not vol:
+        raise HTTPException(404, "Нет такого тома")
+    try:
+        # у пролога и эпилога номера нет (0), у глав и экстра — от 1; проверяем до скачивания картинок
+        number = formats.normalize_number(chapter_type, number)
+        if vol["kind"] == "ranobe":
+            # ссылки на картинки (postimg.cc и др.) скачиваются сюда и упаковываются в .mtx
+            text, pics = await imgmod.embed_images(text)
+            blob = formats.build_mtx(text, title=title, volume=vol["number"], chapter=number,
+                                     max_part_bytes=MTX_PART_BYTES, images=pics, chapter_type=chapter_type)
+            fmt = "mtx"
+        else:
+            files = [await f.read() for f in images if f.filename]
+            files = [f for _, f in sorted(zip([u.filename for u in images if u.filename], files),
+                                          key=lambda p: p[0].lower())]  # порядок страниц — по имени файла
+            blob = formats.build_mpx(files, title=title, volume=vol["number"], chapter=number,
+                                     direction=direction, chapter_type=chapter_type)
+            fmt = "mpx"
+    except formats.FormatError as e:
+        return RedirectResponse(f"/admin?msg={quote(str(e)[:300])}", 303)
+    new_path = db.write_chapter_file(blob, fmt, type=chapter_type, volume=vol["number"], chapter=number)
+    with db.conn() as c:
+        old = c.execute("SELECT path FROM chapters WHERE volume_id=? AND type=? AND number=?",
+                        (volume_id, chapter_type, number)).fetchone()
+        # created при замене не меняем: правка опечатки в главе не должна считаться «новой главой» (для уведомлений)
+        c.execute("INSERT INTO chapters(volume_id, type, number, title, fmt, path, size, created) VALUES(?,?,?,?,?,?,?,?) "
+                  "ON CONFLICT(volume_id, type, number) DO UPDATE SET title=excluded.title, fmt=excluded.fmt, "
+                  "path=excluded.path, size=excluded.size",
+                  (volume_id, chapter_type, number, title, fmt, new_path, len(blob), db.now()))
+        saved = c.execute("SELECT id, created FROM chapters WHERE volume_id=? AND type=? AND number=?",
+                          (volume_id, chapter_type, number)).fetchone()
+    if old:  # главу заменили — старый файл больше не нужен
+        db.delete_chapter_files([old["path"]])
+    elif push.enabled():  # новая глава — мгновенное уведомление всем подписанным устройствам (в фоне)
+        push.fire_and_forget(push.notify_new_chapter(
+            chapter_id=saved["id"], kind=vol["kind"], volume=vol["number"], number=number,
+            title=title, created=saved["created"], chapter_type=chapter_type))
+    return RedirectResponse("/admin?msg=Глава+сохранена", 303)
+
+
+@app.post("/admin/chapters/{cid}/delete", dependencies=[Depends(need_admin)])
+def chapter_delete(cid: int):
+    with db.conn() as c:
+        row = c.execute("SELECT path FROM chapters WHERE id=?", (cid,)).fetchone()
+        c.execute("DELETE FROM chapters WHERE id=?", (cid,))
+    if row:
+        db.delete_chapter_files([row["path"]])
+    return RedirectResponse("/admin?msg=Глава+удалена", 303)
+
+
+# ───────────── Публичные страницы ─────────────
+LEGAL_DIR = Path(__file__).parent / "legal"
+LEGAL = {"tos": "Пользовательское соглашение", "privacy": "Политика конфиденциальности"}
+
+
+def apk_file() -> Path | None:
+    return Path(APK_PATH) if APK_PATH and Path(APK_PATH).is_file() else None
+
+
+@app.get("/", response_class=HTMLResponse)
+def index(request: Request):
+    return templates.TemplateResponse(request, "index.html",
+                                      {"has_download": bool(apk_file() or APP_DOWNLOAD_URL)})
+
+
+@app.get("/download")
+def download():
+    apk = apk_file()
+    if apk:
+        return FileResponse(apk, media_type="application/vnd.android.package-archive", filename="alyanovel.apk")
+    if APP_DOWNLOAD_URL:
+        return RedirectResponse(APP_DOWNLOAD_URL, 302)
+    raise HTTPException(404, "Файл приложения пока не загружен")
+
+
+def legal_page(request: Request, key: str):
+    import markdown  # импорт здесь: нужен только этим страницам
+    text = (LEGAL_DIR / f"{key}.md").read_text(encoding="utf-8")
+    html = markdown.markdown(text, extensions=["sane_lists"])
+    return templates.TemplateResponse(request, "legal.html", {"title": LEGAL[key], "content": html})
+
+
+@app.get("/tos", response_class=HTMLResponse)
+def tos(request: Request):
+    return legal_page(request, "tos")
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+def privacy(request: Request):
+    return legal_page(request, "privacy")

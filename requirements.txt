@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+jinja2
+python-multipart
+itsdangerous
+httpx
+markdown
+kivy==2.3.0
+kivymd==2.0.0
+requests
+websocket-client
+cryptography
+python-dotenv
+plyer

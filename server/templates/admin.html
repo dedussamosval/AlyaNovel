@@ -1,0 +1,36 @@
+{% extends "base.html" %}{% block title %}AlyaNovel · админка{% endblock %}{% block body %}
+<div class="top"><h1>Управление контентом</h1>
+<form method="post" action="/admin/logout"><button class="g">Выйти</button></form></div>
+{% if msg %}<p class="msg">{{ msg }}</p>{% endif %}
+
+<div class="card"><h3>Новый том</h3>
+<form method="post" action="/admin/volumes"><div class="row">
+<div><label>Тип</label><select name="kind"><option value="ranobe">Ранобэ</option><option value="manga">Манга</option></select></div>
+<div><label>Номер</label><input name="number" type="number" min="1" required></div>
+<div><label>Название</label><input name="title"></div></div><button>Создать том</button></form></div>
+
+<div class="card"><h3>Добавить / заменить главу</h3>
+<form method="post" action="/admin/chapters" enctype="multipart/form-data">
+<div class="row"><div><label>Том</label><select name="volume_id" required>
+{% for v in vols %}<option value="{{ v.id }}">{{ 'Ранобэ' if v.kind=='ranobe' else 'Манга' }} · том {{ v.number }} {{ v.title }}</option>{% endfor %}
+</select></div>
+<div><label>Тип</label><select name="chapter_type" onchange="document.getElementById('cnum').disabled=['prologue','epilogue'].includes(this.value)">
+<option value="chapter">Глава</option><option value="prologue">Пролог (R01-P)</option><option value="epilogue">Эпилог (R01-E)</option><option value="extra">Экстра, вне сюжета (R01-A01)</option></select></div>
+<div><label>Номер</label><input id="cnum" name="number" type="number" min="1"></div></div>
+<p class="hint">Номер нужен для глав и экстр; у пролога и эпилога его нет (по одному на том). Повторная загрузка с тем же типом и номером заменяет главу.</p>
+<label>Название главы</label><input name="title">
+<label>Ранобэ: текст главы (.mtx)</label><textarea name="text" rows="8"></textarea>
+<p class="hint">Картинки: <code>![подпись](https://i.postimg.cc/…/pic.jpg)</code> или просто ссылка (прямая или на страницу картинки на postimg.cc / imgur.com) отдельной строкой.
+При сохранении сервер скачает их и положит внутрь главы. Альбомы imgur не поддерживаются — только отдельные картинки.</p>
+<label>Манга: страницы (.mpx) — порядок по имени файла</label>
+<input type="file" name="images" accept="image/jpeg,image/png,image/webp" multiple>
+<label>Направление чтения</label><select name="direction"><option value="rtl">Справа налево</option><option value="ltr">Слева направо</option><option value="vertical">Вертикально</option></select>
+<button>Сохранить главу</button></form></div>
+
+{% for v in vols %}<div class="card"><div class="top">
+<h3>{{ 'Ранобэ' if v.kind=='ranobe' else 'Манга' }} · том {{ v.number }} {{ v.title }}</h3>
+<form method="post" action="/admin/volumes/{{ v.id }}/delete" onsubmit="return confirm('Удалить том вместе со всеми главами?')"><button class="d">Удалить том</button></form></div>
+{% for c in v.chapters %}{% set lbl = {'prologue': 'Пролог', 'epilogue': 'Эпилог'}.get(c.type) or (('Экстра ' ~ c.number) if c.type == 'extra' else ('Глава ' ~ c.number)) %}<div class="ch"><span><b>{{ c.code }}</b> · {{ lbl }} {{ c.title }} <small style="color:var(--mut)">.{{ c.fmt }} · {{ (c.size/1024)|round|int }} КБ</small></span>
+<form method="post" action="/admin/chapters/{{ c.id }}/delete" onsubmit="return confirm('Удалить главу?')"><button class="d">Удалить</button></form></div>
+{% else %}<p style="color:var(--mut)">Глав пока нет — том не виден в приложении.</p>{% endfor %}</div>{% endfor %}
+{% endblock %}

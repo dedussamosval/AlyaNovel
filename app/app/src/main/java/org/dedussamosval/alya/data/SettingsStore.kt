@@ -68,7 +68,7 @@ class SettingsStore(private val context: Context) {
             Prefs(
                 notifyChapters = p[Keys.NOTIFY_CHAPTERS] ?: true,
                 notifyChat = p[Keys.NOTIFY_CHAT] ?: true,
-                saveOffline = p[Keys.SAVE_OFFLINE] ?: true,
+                saveOffline = p[Keys.SAVE_OFFLINE] ?: false,
                 wifiOnly = p[Keys.WIFI_ONLY] ?: false,
                 theme = p[Keys.THEME] ?: "system",
                 fontSize = p[Keys.FONT_SIZE] ?: 17,

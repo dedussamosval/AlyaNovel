@@ -14,3 +14,4 @@ button.d{background:var(--danger);padding:5px 10px;margin:0}button.g{background:
 a.pill{color:var(--mut);text-decoration:none;border:1px solid var(--bd);border-radius:999px;padding:5px 12px}
 a.pill:hover{color:var(--acc);border-color:var(--acc)}
 .hint{color:var(--mut);font-size:13px;line-height:1.5;margin:6px 0 0}.hint code{background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:1px 5px}
+.exit{display:inline-block;margin:12px 0;color:var(--mut);text-decoration:none}

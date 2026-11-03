@@ -90,13 +90,13 @@ private fun LoginPrompt(login: LoginState, onLogin: () -> Unit, onCancel: () -> 
                 }
                 Text("Чат читателей", style = MaterialTheme.typography.titleLarge)
                 Text(
-                    "Чат доступен после входа через Telegram — без паролей: откроется бот, нажмите Start и вернитесь в приложение.",
+                    "Чат доступен после входа через Telegram — без паролей: откроется бот, нажмите Start и вернитесь в приложение. (Временно недоступно)",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
                 when (login) {
-                    LoginState.Idle -> PrimaryButton("Войти через Telegram", onLogin)
+                    LoginState.Idle -> PrimaryButton("Войти через Telegram", onLogin, enabled = false) // временно отключил кнопку
                     LoginState.Waiting -> {
                         CircularProgressIndicator(modifier = Modifier.size(28.dp))
                         Text(

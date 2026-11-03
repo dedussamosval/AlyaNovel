@@ -59,7 +59,7 @@ object Notifications {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val n = NotificationCompat.Builder(context, CHANNEL_CHAPTERS)
-            .setSmallIcon(R.drawable.ic_stat_book)
+            .setSmallIcon(R.drawable.ic_alya_chibi)
             .setContentTitle(title)
             .setContentText(text)
             .setContentIntent(open)

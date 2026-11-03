@@ -5,6 +5,8 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote
+from dotenv import load_dotenv
+load_dotenv()
 
 import httpx
 from fastapi import (Depends, FastAPI, File, Form, Header, HTTPException, Request,
@@ -12,7 +14,9 @@ from fastapi import (Depends, FastAPI, File, Form, Header, HTTPException, Reques
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.exception_handlers import http_exception_handler as DHEH   # default http exception handler
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from common import formats  # noqa: E402
@@ -20,6 +24,8 @@ from server import db  # noqa: E402
 from server import images as imgmod  # noqa: E402
 from server import net  # noqa: E402
 from server import push  # noqa: E402
+from server import security # noqa: E402
+
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 BOT_USERNAME = os.environ.get("BOT_USERNAME", "your_bot")
@@ -100,6 +106,7 @@ app = FastAPI(title="AlyaNovel", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, same_site="strict",
                    https_only=os.environ.get("HTTPS_ONLY", "0") == "1", max_age=8 * 3600)
+app.middleware("http")(security.guard)
 
 
 # ───────────── Публичный API ─────────────
@@ -172,8 +179,7 @@ def auth_poll(token: str):
         if row["tg_id"] is None:
             return {"status": "pending"}
         c.execute("DELETE FROM auth_requests WHERE token=?", (token,))
-        session = secrets.token_urlsafe(32)
-        c.execute("INSERT INTO sessions(token, tg_id, created) VALUES(?,?,?)", (session, row["tg_id"], db.now()))
+        session = db.create_session(c, row["tg_id"])
         user = c.execute("SELECT name FROM users WHERE tg_id=?", (row["tg_id"],)).fetchone()
     return {"status": "ok", "session": session, "name": user["name"]}
 
@@ -181,11 +187,10 @@ def auth_poll(token: str):
 def current_user(authorization: str = Header(default="")):
     token = authorization.removeprefix("Bearer ").strip()
     with db.conn() as c:
-        row = c.execute("SELECT u.tg_id, u.name FROM sessions s JOIN users u USING(tg_id) WHERE s.token=?",
-                        (token,)).fetchone()
-    if not row:
+        user = db.session_user(c, token)
+    if not user:
         raise HTTPException(401)
-    return dict(row)
+    return user
 
 
 # ───────────── Чат ─────────────
@@ -214,12 +219,13 @@ def chat_history(limit: int = 50, user=Depends(current_user)):
 
 @app.websocket("/ws/chat")
 async def chat_ws(ws: WebSocket, token: str = ""):
+    user = None
     with db.conn() as c:
-        row = c.execute("SELECT u.tg_id, u.name FROM sessions s JOIN users u USING(tg_id) WHERE s.token=?",
-                        (token,)).fetchone()
-    if not row:
+        user = db.session_user(c, token)
+    if not user:
         await ws.close(code=4401)
         return
+
     await ws.accept()
     hub.clients.add(ws)
     try:
@@ -227,10 +233,18 @@ async def chat_ws(ws: WebSocket, token: str = ""):
             text = (await ws.receive_text()).strip()[:2000]
             if not text:
                 continue
+
             with db.conn() as c:
-                cur = c.execute("INSERT INTO messages(tg_id, name, text, created) VALUES(?,?,?,?)",
-                                (row["tg_id"], row["name"], text, db.now()))
-            await hub.broadcast({"id": cur.lastrowid, "name": row["name"], "text": text, "created": db.now()})
+                cur = c.execute(
+                    "INSERT INTO messages(tg_id, name, text, created) VALUES(?,?,?,?)",
+                    (user["tg_id"], user["name"], text, db.now()),
+                )
+            await hub.broadcast({
+                "id": cur.lastrowid,
+                "name": user["name"],
+                "text": text,
+                "created": db.now(),
+            })
     except WebSocketDisconnect:
         pass
     finally:
@@ -245,6 +259,8 @@ def need_admin(request: Request):
 
 @app.get("/admin/login", response_class=HTMLResponse)
 def login_page(request: Request):
+    if request.session.get("admin"):
+        return RedirectResponse("/admin", status_code=303)
     return templates.TemplateResponse(request, "login.html", {"error": None})
 
 
@@ -388,3 +404,15 @@ def tos(request: Request):
 @app.get("/privacy", response_class=HTMLResponse)
 def privacy(request: Request):
     return legal_page(request, "privacy")
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    if exc.status_code == 404:
+        return templates.TemplateResponse(
+            request=request,
+            name="notfound.html",
+            # context={"request": request},
+            status_code=404,
+        )
+    return await DHEH(request, exc)

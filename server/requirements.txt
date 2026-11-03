@@ -3,5 +3,10 @@ uvicorn[standard]
 jinja2
 python-multipart
 itsdangerous
-httpx[socks]>=0.27
+httpx
 markdown
+requests
+websocket-client
+cryptography
+python-dotenv
+plyer

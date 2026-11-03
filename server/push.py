@@ -25,12 +25,11 @@ import sys
 import time
 from pathlib import Path
 from dotenv import load_dotenv
+load_dotenv()
 
 import httpx
-
 from server import net
 
-load_dotenv()
 
 FCM_SERVICE_ACCOUNT = os.environ.get("FCM_SERVICE_ACCOUNT", "")
 TOPIC = os.environ.get("FCM_TOPIC", "new_chapters")  # то же имя, что Push.TOPIC в приложении

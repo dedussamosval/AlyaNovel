@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import httpx
+from sqlite3 import IntegrityError
 from fastapi import (Depends, FastAPI, File, Form, Header, HTTPException, Request,
                      Response, UploadFile, WebSocket, WebSocketDisconnect)
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -290,6 +291,80 @@ def admin_home(request: Request, msg: str = ""):
             for r in v["chapters"]:
                 r["code"] = formats.chapter_code(v["kind"], v["number"], r["type"], r["number"])
     return templates.TemplateResponse(request, "admin.html", {"vols": vols, "msg": msg})
+
+@app.get("/admin/settings", response_class=HTMLResponse,
+         dependencies=[Depends(need_admin)])
+def admin_settings(request: Request):
+    return templates.TemplateResponse(request, "settings.html", {"error": None})
+
+
+@app.post("/admin/settings", response_class=HTMLResponse, dependencies=[Depends(need_admin)])
+def admin_settings_update(request: Request, current_password: str = Form(), new_login: str = Form(""), new_password: str = Form(""), new_password_confirm: str = Form("")):
+    current_login = request.session.get("admin")
+    new_login = new_login.strip()
+
+    with db.conn() as c:
+        admin = c.execute(
+            "SELECT id, login, pwhash FROM admins WHERE login=?",
+            (current_login,),
+        ).fetchone()
+
+        if not admin or not db.check_pw(current_password, admin["pwhash"]):
+            error = "Текущий пароль указан неверно."
+            return templates.TemplateResponse(
+                request, "settings.html", {"error": error}, status_code=400
+            )
+
+        if new_login and len(new_login) > 64:
+            return templates.TemplateResponse(
+                request, "settings.html",
+                {"error": "Логин не должен превышать 64 символа."},
+                status_code=400,
+            )
+
+        if new_password and len(new_password) < 12:
+            return templates.TemplateResponse(
+                request, "settings.html",
+                {"error": "Новый пароль должен содержать не менее 12 символов."},
+                status_code=400,
+            )
+
+        if new_password != new_password_confirm:
+            return templates.TemplateResponse(
+                request, "settings.html",
+                {"error": "Новые пароли не совпадают."},
+                status_code=400,
+            )
+
+        updated_login = new_login or current_login
+        updated_hash = (
+            db.hash_pw(new_password)
+            if new_password
+            else admin["pwhash"]
+        )
+
+        if updated_login == current_login and not new_password:
+            return templates.TemplateResponse(
+                request, "settings.html",
+                {"error": "Нет изменений для сохранения."},
+                status_code=400,
+            )
+
+        try:
+            c.execute(
+                "UPDATE admins SET login=?, pwhash=? WHERE id=?",
+                (updated_login, updated_hash, admin["id"]),
+            )
+        except IntegrityError:
+            return templates.TemplateResponse(
+                request, "settings.html",
+                {"error": "Такой логин уже занят."},
+                status_code=400,
+            )
+
+    # Чтобы текущий администратор остался в системе после смены логина.
+    request.session["admin"] = updated_login
+    return RedirectResponse("/admin?msg=Настройки+сохранены", status_code=303)
 
 
 @app.post("/admin/volumes", dependencies=[Depends(need_admin)])

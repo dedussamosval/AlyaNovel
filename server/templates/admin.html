@@ -1,37 +1,209 @@
-{% extends "base.html" %}{% block title %}AlyaNovel.ru · админка{% endblock %}{% block body %}
+{% extends "base.html" %}
+{% block title %}AlyaNovel.ru · админка{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="/static/css/admin.css">
+{% endblock %}
+
+{% block body %}
 <a class="exit" href="/">← На главную</a>
-<div class="top"><h1>Управление контентом</h1>
-<form method="post" action="/admin/logout"><button class="g">Выйти</button></form></div>
-{% if msg %}<p class="msg">{{ msg }}</p>{% endif %}
 
-<div class="card"><h3>Новый том</h3>
-<form method="post" action="/admin/volumes"><div class="row">
-<div><label>Тип</label><select name="kind"><option value="ranobe">Ранобэ</option><option value="manga">Манга</option></select></div>
-<div><label>Номер</label><input name="number" type="number" min="1" required></div>
-<div><label>Название</label><input name="title"></div></div><button>Создать том</button></form></div>
+<div class="top">
+  <h1>Управление контентом</h1>
+  <div class="admin-actions">
+    <a class="admin-settings-link" href="/admin/settings">Настройки</a>
+    <form method="post" action="/admin/logout">
+      <button class="g">Выйти</button>
+    </form>
+  </div>
+</div>
 
-<div class="card"><h3>Добавить / заменить главу</h3>
-<form method="post" action="/admin/chapters" enctype="multipart/form-data">
-<div class="row"><div><label>Том</label><select name="volume_id" required>
-{% for v in vols %}<option value="{{ v.id }}">{{ 'Ранобэ' if v.kind=='ranobe' else 'Манга' }} · том {{ v.number }} {{ v.title }}</option>{% endfor %}
-</select></div>
-<div><label>Тип</label><select name="chapter_type" onchange="document.getElementById('cnum').disabled=['prologue','epilogue'].includes(this.value)">
-<option value="chapter">Глава</option><option value="prologue">Пролог (R01-P)</option><option value="epilogue">Эпилог (R01-E)</option><option value="extra">Экстра, вне сюжета (R01-A01)</option></select></div>
-<div><label>Номер</label><input id="cnum" name="number" type="number" min="1"></div></div>
-<p class="hint">Номер нужен для глав и экстр; у пролога и эпилога его нет (по одному на том). Повторная загрузка с тем же типом и номером заменяет главу.</p>
-<label>Название главы</label><input name="title">
-<label>Ранобэ: текст главы (.mtx)</label><textarea name="text" rows="8"></textarea>
-<p class="hint">Картинки: <code>![подпись](https://i.postimg.cc/…/pic.jpg)</code> или просто ссылка (прямая или на страницу картинки на postimg.cc / imgur.com) отдельной строкой.
-При сохранении сервер скачает их и положит внутрь главы. Альбомы imgur не поддерживаются — только отдельные картинки.</p>
-<label>Манга: страницы (.mpx) — порядок по имени файла</label>
-<input type="file" name="images" accept="image/jpeg,image/png,image/webp" multiple>
-<label>Направление чтения</label><select name="direction"><option value="rtl">Справа налево</option><option value="ltr">Слева направо</option><option value="vertical">Вертикально</option></select>
-<button>Сохранить главу</button></form></div>
+{% if msg %}
+<div id="server-message" data-message="{{ msg }}"></div>
+{% endif %}
 
-{% for v in vols %}<div class="card"><div class="top">
-<h3>{{ 'Ранобэ' if v.kind=='ranobe' else 'Манга' }} · том {{ v.number }} {{ v.title }}</h3>
-<form method="post" action="/admin/volumes/{{ v.id }}/delete" onsubmit="return confirm('Удалить том вместе со всеми главами?')"><button class="d">Удалить том</button></form></div>
-{% for c in v.chapters %}{% set lbl = {'prologue': 'Пролог', 'epilogue': 'Эпилог'}.get(c.type) or (('Экстра ' ~ c.number) if c.type == 'extra' else ('Глава ' ~ c.number)) %}<div class="ch"><span><b>{{ c.code }}</b> · {{ lbl }} {{ c.title }} <small style="color:var(--mut)">.{{ c.fmt }} · {{ (c.size/1024)|round|int }} КБ</small></span>
-<form method="post" action="/admin/chapters/{{ c.id }}/delete" onsubmit="return confirm('Удалить главу?')"><button class="d">Удалить</button></form></div>
-{% else %}<p style="color:var(--mut)">Глав пока нет — том не виден в приложении.</p>{% endfor %}</div>{% endfor %}
+<div class="card">
+  <h3>Новый том</h3>
+  <form method="post" action="/admin/volumes">
+    <div class="row">
+      <div>
+        <label for="volume-kind">Тип</label>
+        <select id="volume-kind" name="kind">
+          <option value="ranobe">Ранобэ</option>
+          <option value="manga">Манга</option>
+        </select>
+      </div>
+      <div>
+        <label for="volume-number">Номер</label>
+        <input id="volume-number" name="number" type="number" min="1" required>
+      </div>
+      <div>
+        <label for="volume-title">Название</label>
+        <input id="volume-title" name="title">
+      </div>
+    </div>
+    <button>Создать том</button>
+  </form>
+</div>
+
+<div class="card">
+  <h3>Добавить / заменить главу</h3>
+
+  <form id="chapter-form" method="post" action="/admin/chapters"
+        enctype="multipart/form-data">
+    <div class="row">
+      <div>
+        <label for="volume-select">Том</label>
+        <select id="volume-select" name="volume_id" required>
+          {% for v in vols %}
+          <option value="{{ v.id }}"
+                  data-kind="{{ v.kind }}"
+                  data-volume="{{ v.number }}"
+                  data-existing='{{ v.chapters | tojson | forceescape }}'>
+            {{ 'Ранобэ' if v.kind == 'ranobe' else 'Манга' }} · том {{ v.number }} {{ v.title }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label for="chapter-type">Тип</label>
+        <select id="chapter-type" name="chapter_type">
+          <option value="chapter">Глава</option>
+          <option value="prologue">Пролог</option>
+          <option value="epilogue">Эпилог</option>
+          <option value="extra">Экстра, вне сюжета</option>
+        </select>
+      </div>
+
+      <div>
+        <label for="cnum">Номер</label>
+        <input id="cnum" name="number" type="number" min="1">
+      </div>
+    </div>
+
+    <p class="hint">
+      Номер нужен для глав и экстр; у пролога и эпилога его нет.
+      Повторная загрузка главы с тем же типом и номером заменит её.
+    </p>
+
+    <div class="chapter-preview" aria-live="polite">
+      Код главы: <code id="chapter-code">—</code>
+      <span id="replace-warning" class="replace-warning" hidden>
+        Будет заменена существующая глава.
+      </span>
+    </div>
+
+    <label for="chapter-title">Название главы</label>
+    <input id="chapter-title" name="title">
+
+    <section id="ranobe-fields">
+      <label for="chapter-text">Ранобэ: текст главы (.mtx)</label>
+      <textarea id="chapter-text" name="text" rows="8"></textarea>
+
+      <div class="draft-meta">
+        <span id="text-stats">0 символов · 0 слов</span>
+        <span id="draft-status" role="status"></span>
+      </div>
+
+      <p class="hint">
+        Картинки можно вставлять ссылкой отдельной строкой или в Markdown:
+        <code>![подпись](https://i.postimg.cc/…/pic.jpg)</code>.
+        Поддерживаются прямые ссылки и страницы одной картинки на разрешённых хостах.
+        Сервер скачает изображения и включит их в главу.
+        Альбомы imgur не поддерживаются.
+      </p>
+    </section>
+
+    <section id="manga-fields" hidden>
+      <label for="manga-images">Манга: страницы (.mpx), порядок по имени файла</label>
+      <input id="manga-images" type="file" name="images"
+             accept="image/jpeg,image/png,image/webp" multiple>
+      <p id="manga-file-info" class="hint">Файлы ещё не выбраны.</p>
+      <div id="manga-preview" class="manga-preview" aria-live="polite"></div>
+
+      <label for="direction">Направление чтения</label>
+      <select id="direction" name="direction">
+        <option value="rtl">Справа налево</option>
+        <option value="ltr">Слева направо</option>
+        <option value="vertical">Вертикально</option>
+      </select>
+    </section>
+
+    <div class="upload-progress" id="upload-progress" hidden>
+      <progress id="upload-progress-bar" max="100" value="0"></progress>
+      <span id="upload-progress-label">Подготовка загрузки…</span>
+    </div>
+
+    <button id="save-chapter">Сохранить главу</button>
+  </form>
+</div>
+
+<div class="volume-tools">
+  <h2>Существующие тома</h2>
+  <label for="chapter-search">Поиск по коду и названию главы</label>
+  <input id="chapter-search" type="search" placeholder="Например, R01-03 или название">
+</div>
+
+{% for v in vols %}
+<details class="card volume-card"
+         data-volume-search="{{ v.number }} {{ v.title }}">
+  <summary>
+    <span>
+      {{ 'Ранобэ' if v.kind == 'ranobe' else 'Манга' }}
+      · том {{ v.number }} {{ v.title }}
+      <small>({{ v.chapters | length }} глав)</small>
+    </span>
+
+    <form method="post" action="/admin/volumes/{{ v.id }}/delete"
+          class="delete-form"
+          data-confirm-title="Удалить {{ 'ранобэ' if v.kind == 'ranobe' else 'мангу' }} том {{ v.number }}?"
+          data-confirm-detail="В томе {{ v.chapters | length }} глав. Все файлы глав будут удалены.">
+      <button class="d" type="submit">Удалить том</button>
+    </form>
+  </summary>
+
+  <div class="volume-content">
+    {% for c in v.chapters %}
+      {% set lbl = {'prologue': 'Пролог', 'epilogue': 'Эпилог'}.get(c.type)
+                   or (('Экстра ' ~ c.number) if c.type == 'extra'
+                       else ('Глава ' ~ c.number)) %}
+      <div class="ch chapter-row"
+           data-chapter-search="{{ c.code }} {{ lbl }} {{ c.title }}">
+        <span>
+          <b>{{ c.code }}</b> · {{ lbl }} {{ c.title }}
+          <small class="chapter-meta">
+            .{{ c.fmt }} · {{ (c.size / 1024) | round | int }} КБ
+          </small>
+        </span>
+
+        <form method="post" action="/admin/chapters/{{ c.id }}/delete"
+              class="delete-form"
+              data-confirm-title="Удалить {{ c.code }}?"
+              data-confirm-detail="{{ lbl }} {{ c.title }}">
+          <button class="d" type="submit">Удалить</button>
+        </form>
+      </div>
+    {% else %}
+      <p class="empty-volume">Глав пока нет — том не виден в приложении.</p>
+    {% endfor %}
+  </div>
+</details>
+{% endfor %}
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<dialog id="confirm-dialog">
+  <form method="dialog">
+    <h3 id="confirm-title">Подтвердите действие</h3>
+    <p id="confirm-detail"></p>
+    <div class="dialog-actions">
+      <button value="cancel" class="g">Отмена</button>
+      <button value="confirm" class="d">Удалить</button>
+    </div>
+  </form>
+</dialog>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/admin.js" defer></script>
 {% endblock %}

@@ -21,6 +21,7 @@ MAX_UPLOAD_BYTES = int(float(os.environ.get("MAX_UPLOAD_MB", "300")) * 1024 * 10
 # (метод, префикс пути, запросов, окно в секундах); первое совпадение; limit=None — не ограничивать
 RULES = [
     ("POST", "/admin/login", 20, 300),
+    ("POST", "/admin/settings", 10, 30),
     ("POST", "/api/auth/start", 20, 600),
     ("GET", "/api/auth/poll/", 150, 60),
     ("GET", "/api/chapters/", 60, 60),
@@ -35,8 +36,8 @@ SECURITY_HEADERS = {
     "Referrer-Policy": "same-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
     # в админке есть inline-обработчики (onchange/onsubmit), поэтому script-src 'unsafe-inline'; всё остальное — только со своего домена
-    "Content-Security-Policy": ("default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
-                                "script-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"),
+    "Content-Security-Policy": ("default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; "
+                                "script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"),
 }
 if HTTPS_ONLY:
     SECURITY_HEADERS["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"

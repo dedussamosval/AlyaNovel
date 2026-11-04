@@ -1,5 +1,6 @@
 {% extends "base.html" %}
-{% block head %}<link rel="stylesheet" href="/static/site.css">{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/site.css">{% endblock %}
+{% block bodyclass %}bg{% endblock %}
 {% block body %}
 <section class="hero">
   <h1>AlyaNovel</h1>
@@ -26,4 +27,13 @@
 
 <p class="note">Материалы — неофициальный фанатский перевод, права на оригинальное произведение принадлежат их правообладателям.
 Подробнее — в <a href="/tos">Условиях использования</a> и <a href="/privacy">Политике конфиденциальности</a>.</p>
+<div id="mascot" class="mascot" hidden
+     data-quotes-url='/static/data/alyaquotes.json'>
+  <div class="m-bubble" role="status"></div>
+  <img src="/static/img/alya.png" alt="" draggable="false">
+</div>
+{% block footer_links %}{% endblock %}
+<noscript><style>.bg::before,.bg::after{opacity:1}</style></noscript>
+{% endblock %}
+{% block scripts %}<script src="/static/js/fx.js" defer></script>
 {% endblock %}

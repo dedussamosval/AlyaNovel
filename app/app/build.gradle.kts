@@ -21,8 +21,8 @@ android {
         applicationId = "org.dedussamosval.alya"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.2.11-beta"
+        versionCode = 10
+        versionName = "0.2.12-beta"
         buildConfigField("String", "SERVER_URL", quoted(serverUrl))
     }
 
@@ -41,7 +41,7 @@ android {
     applicationVariants.all {
         val v = this
         v.outputs.map { it as com.android.build.gradle.internal.api.BaseVariantOutputImpl }.forEach { output ->
-            output.outputFileName = "alyanovel-${v.versionName}.apk"
+            output.outputFileName = "alyanovel-v.${v.versionName}.apk"
         }
     }
 

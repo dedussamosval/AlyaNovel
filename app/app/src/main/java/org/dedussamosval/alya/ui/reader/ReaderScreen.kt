@@ -143,7 +143,7 @@ private fun ReaderContent(
     // Манга — лента страниц во всю ширину без полей; ранобэ — текст с полями и скруглёнными иллюстрациями
     val sidePadding = if (state.isManga) 0.dp else 20.dp
     val listState = rememberLazyListState()
-    val pages = state.items.size
+    val pages = state.items.count { it is ReaderItem.Picture }
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
@@ -163,6 +163,26 @@ private fun ReaderContent(
                         ),
                         modifier = Modifier.padding(horizontal = sidePadding),
                     )
+
+                    is ReaderItem.Header -> {
+                        val family = if (state.isManga) FontFamily.Default else fontFamily
+                        Column(
+                            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(item.label, style = MaterialTheme.typography.titleLarge.copy(fontFamily = family))
+                            if (item.title.isNotBlank()) {
+                                Text(item.title, style = MaterialTheme.typography.titleMedium.copy(fontFamily = family))
+                            }
+                            if (item.date != null) {
+                                Text(
+                                    "Опубликовано: ${item.date}",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = family),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
 
                     is ReaderItem.Picture -> Column(Modifier.padding(horizontal = if (state.isManga) 0.dp else 12.dp)) {
                         AsyncImage(
@@ -224,7 +244,7 @@ private fun ReaderContent(
         FastScrollbar(
             state = listState,
             label = { index, total ->
-                if (state.isManga) "${(index + 1).coerceAtMost(pages)} / $pages"
+                if (state.isManga) "${index.coerceIn(1, pages)} / $pages"   // индекс 0 — шапка
                 else "${(index * 100f / (total - 1).coerceAtLeast(1)).roundToInt()}%"
             },
         )

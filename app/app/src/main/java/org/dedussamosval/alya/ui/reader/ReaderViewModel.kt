@@ -20,6 +20,10 @@ import org.dedussamosval.alya.formats.Manifest
 import org.dedussamosval.alya.formats.parseImageLine
 import java.io.File
 import java.io.IOException
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 sealed interface ReaderItem {
     data class Paragraph(val text: String) : ReaderItem
@@ -28,6 +32,8 @@ sealed interface ReaderItem {
     data class Picture(val file: File, val aspect: Float, val caption: String) : ReaderItem
 
     data class Missing(val caption: String) : ReaderItem
+    /** Шапка главы: номер главы, название, дата публикации **/
+    data class Header(val label: String, val title: String, val date: String?) : ReaderItem
 }
 
 sealed interface ReaderState {
@@ -51,6 +57,16 @@ class ReaderViewModel(private val c: AppContainer, private val chapterId: Int) :
     init {
         load()
     }
+
+    private val dateFormat = DateTimeFormatter
+        .ofPattern("d MMMM yyyy, HH:mm", Locale("ru"))
+        .withZone(ZoneId.systemDefault())   // перевод в часовой пояс телефона
+
+    private fun headerOf(ch: Chapter) = ReaderItem.Header(
+        label = ch.label,
+        title = ch.title,
+        date = if (ch.created > 0) dateFormat.format(Instant.ofEpochSecond(ch.created)) else null,
+    )
 
     private fun load() {
         val ch = chapter
@@ -86,6 +102,7 @@ class ReaderViewModel(private val c: AppContainer, private val chapterId: Int) :
         val manifest = ChapterFiles.readManifest(file)
         val parts = ChapterFiles.mtxPartNames(manifest)
         val items = ArrayList<ReaderItem>()
+        items += headerOf(ch)
         val picturesDir = c.files.pagesDirFor(ch)
         parts.forEachIndexed { index, name ->
             items += textItems(file, manifest, ChapterFiles.readText(file, name), picturesDir)
@@ -117,7 +134,7 @@ class ReaderViewModel(private val c: AppContainer, private val chapterId: Int) :
     private fun loadPages(ch: Chapter, file: File) {
         val manifest = ChapterFiles.readManifest(file)
         val pages = ChapterFiles.extractMpxPages(file, manifest, c.files.pagesDirFor(ch))
-        val items = pages.map { ReaderItem.Picture(it, aspectOf(it), "") }
+        val items = listOf<ReaderItem>(headerOf(ch)) + pages.map{ ReaderItem.Picture(it, aspectOf(it), "") }
         _state.value = ReaderState.Ready(items, isManga = true, done = true)
     }
 

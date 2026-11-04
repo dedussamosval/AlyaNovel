@@ -177,6 +177,7 @@ def now() -> int:
 
 if __name__ == "__main__":
     # python -m server.db create-admin <login> <password>
+    DB_PATH = 'server/alyanovel.db' # заглушка
     init()
     if len(sys.argv) in (3, 4) and sys.argv[1] == "create-admin":
         # пароль лучше не писать в командной строке (остаётся в истории оболочки) — тогда он будет запрошен скрыто

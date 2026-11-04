@@ -143,7 +143,7 @@ private fun ReaderContent(
     // Манга — лента страниц во всю ширину без полей; ранобэ — текст с полями и скруглёнными иллюстрациями
     val sidePadding = if (state.isManga) 0.dp else 20.dp
     val listState = rememberLazyListState()
-    val pages = state.items.count { it is ReaderItem.Picture }
+    val pages = state.items.size
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(

@@ -1,0 +1,17 @@
+[
+  {
+    "id": 1,
+    "number": 1,
+    "title": "Начало «1»",
+    "chapters": [
+      {
+        "id": 10,
+        "number": 1,
+        "title": "Пролог",
+        "fmt": "mtx",
+        "size": 359,
+        "created": 1792712832
+      }
+    ]
+  }
+]

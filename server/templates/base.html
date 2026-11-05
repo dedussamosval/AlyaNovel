@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}AlyaNovel.ru{% endblock %}</title>
+<link rel="shortcut icon" href="{{ url_for('static', path='img/favicon.ico') }}" type="image/x-icon">
+<link rel="stylesheet" href="/static/css/base.css">
+{% block head %}{% endblock %}</head>
+
+<body class="{% block bodyclass %}{% endblock %}">
+<main>{% block body %}{% endblock %}</main>
+<footer class="foot">
+<span>© 2026 Dedus Samosval</span>
+{% block footer_links %}<nav>
+<a class="pill" href="/tos">Условия использования</a>
+<a class="pill" href="/privacy">Конфиденциальность</a>
+</nav> {% endblock %}
+</footer>
+{% block scripts %}{% endblock %}
+</body></html>

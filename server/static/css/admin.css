@@ -1,0 +1,227 @@
+[hidden] {
+  display: none !important;
+}
+
+.chapter-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 10px 0;
+}
+
+.chapter-preview code {
+  background: var(--bg);
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+  padding: 3px 7px;
+}
+
+.replace-warning,
+.file-error {
+  color: var(--danger);
+}
+
+.draft-meta {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 5px;
+  color: var(--mut);
+  font-size: 13px;
+}
+
+.manga-preview {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.manga-preview figure {
+  margin: 0;
+  min-width: 0;
+}
+
+.manga-preview img {
+  display: block;
+  width: 100%;
+  height: 140px;
+  object-fit: contain;
+  background: var(--bg);
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+}
+
+.manga-preview figcaption,
+.chapter-meta,
+.volume-card summary small {
+  color: var(--mut);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.upload-progress {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  color: var(--mut);
+  font-size: 13px;
+}
+
+.upload-progress progress {
+  width: 100%;
+  accent-color: var(--acc);
+}
+
+.volume-tools {
+  margin: 24px 0 12px;
+}
+
+.volume-tools h2 {
+  margin-bottom: 10px;
+}
+
+.volume-card summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.volume-card summary form {
+  flex: 0 0 auto;
+}
+
+.volume-content {
+  margin-top: 12px;
+}
+
+.chapter-row {
+  gap: 12px;
+}
+
+.chapter-row > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.empty-volume {
+  color: var(--mut);
+}
+
+.toast {
+  position: fixed;
+  z-index: 20;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  max-width: min(440px, calc(100vw - 32px));
+  padding: 12px 16px;
+  border: 1px solid var(--bd);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--fg);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 18%);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.toast.visible {
+  opacity: 1;
+  transform: none;
+}
+
+#confirm-dialog {
+  width: min(440px, calc(100% - 32px));
+  border: 1px solid var(--bd);
+  border-radius: 14px;
+  background: var(--card);
+  color: var(--fg);
+}
+
+#confirm-dialog::backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.dialog-actions button {
+  margin-top: 8px;
+}
+
+@media (max-width: 560px) {
+  .row {
+    flex-direction: column;
+  }
+
+  .volume-card summary {
+    align-items: flex-start;
+  }
+
+  .ch {
+    align-items: flex-start;
+  }
+}
+
+.manga-page {
+  cursor: grab;
+}
+
+.manga-page:active {
+  cursor: grabbing;
+}
+
+.page-controls {
+  display: flex;
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.page-controls button {
+  flex: 1;
+  margin: 0;
+  padding: 3px 8px;
+}
+
+.page-controls button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.arrow-up::before { content: "←"; }
+.arrow-down::before { content: "→"; }
+
+@media (max-width: 767px) {
+  .arrow-up::before { content: "↑"; }
+  .arrow-down::before { content: "↓"; }
+}
+
+.admin-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-settings-link {
+  display: inline-block;
+  padding: 9px 16px;
+  margin-top: 10px;
+  border: 1px solid var(--bd);
+  border-radius: 9px;
+  color: var(--mut);
+  text-decoration: none;
+}
+
+.admin-settings-link:hover {
+  color: var(--acc);
+  border-color: var(--acc);
+}

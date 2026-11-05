@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Настройки администратора · AlyaNovel.ru{% endblock %}
+
+{% block body %}
+<a class="exit" href="/admin">← Назад</a>
+
+<div class="card">
+  <h1>Настройки администратора</h1>
+  <p class="hint">Измените логин, пароль или оба значения сразу.</p>
+
+  {% if error %}
+    <p class="err">{{ error }}</p>
+  {% endif %}
+
+  <form method="post" action="/admin/settings">
+    <label for="current-password">Текущий пароль</label>
+    <input id="current-password" name="current_password"
+           type="password" autocomplete="current-password" required>
+
+    <label for="new-login">Новый логин</label>
+    <input id="new-login" name="new_login"
+           autocomplete="username" maxlength="64"
+           placeholder="Оставьте пустым, чтобы не менять">
+
+    <label for="new-password">Новый пароль</label>
+    <input id="new-password" name="new_password"
+           type="password" autocomplete="new-password"
+           placeholder="Оставьте пустым, чтобы не менять">
+
+    <label for="new-password-confirm">Повторите новый пароль</label>
+    <input id="new-password-confirm" name="new_password_confirm"
+           type="password" autocomplete="new-password">
+
+    <p class="hint">Новый пароль должен содержать не менее 12 символов.</p>
+    <button type="submit">Сохранить настройки</button>
+  </form>
+</div>
+{% endblock %}

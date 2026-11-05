@@ -33,7 +33,7 @@ BOT_USERNAME = os.environ.get("BOT_USERNAME", "your_bot")
 SECRET_KEY = os.environ.get("SECRET_KEY", "change-me")
 APP_VERSION = os.environ.get("APP_LATEST_VERSION", "0.1.0")
 APP_DOWNLOAD_URL = os.environ.get("APP_DOWNLOAD_URL", "")
-APK_PATH = os.environ.get("APK_PATH", "")          # путь к APK на сервере — тогда /download отдаёт его сам
+APK_DIR = Path(os.environ["APK_PATH"]).expanduser() if os.environ.get("APK_PATH") else None # путь к APK на сервере — тогда /download отдаёт его сам
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")  # https://домен — для ссылки на APK в проверке обновлений
 MTX_PART_BYTES = int(os.environ.get("MTX_PART_KB", "32")) * 1024  # вес одной части текста в .mtx
 AUTH_TTL = 600
@@ -94,6 +94,16 @@ def confirm_auth(token: str, tg_id: int, username: str | None, name: str) -> boo
                   (tg_id, username, name or username or str(tg_id)))
     return True
 
+def read_app_version() -> str | None:
+    if APK_DIR is None:
+        return None
+    try:
+        version = (APK_DIR / "version.txt").read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError):
+        return None
+
+    return version
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -146,8 +156,10 @@ def chapter_file(chapter_id: int):
 
 @app.get("/api/app-version")
 def app_version():
-    url = APP_DOWNLOAD_URL or (f"{PUBLIC_URL}/download" if PUBLIC_URL and apk_file() else "")
-    return {"latest": APP_VERSION, "url": url}
+    release = apk_file()
+    latest = read_app_version() or APP_VERSION
+    url = f"{PUBLIC_URL}/download" if release and PUBLIC_URL else ""
+    return {"latest": latest, "url": url}
 
 
 @app.get("/api/latest")
@@ -444,23 +456,31 @@ LEGAL_DIR = Path(__file__).parent / "legal"
 LEGAL = {"tos": "Пользовательское соглашение", "privacy": "Политика конфиденциальности"}
 
 
-def apk_file() -> Path | None:
-    return Path(APK_PATH) if APK_PATH and Path(APK_PATH).is_file() else None
+def apk_file() -> tuple[str, Path] | None:
+    version = read_app_version()
+    if APK_DIR is None or version is None:
+        return None
+
+    apk = APK_DIR / f"alyanovel-v.{version}.apk"
+    return (version, apk) if apk.is_file() else None
 
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(request, "index.html",
-                                      {"has_download": bool(apk_file() or APP_DOWNLOAD_URL)})
+                                      {"has_download": apk_file() is not None})
 
 
 @app.get("/download")
 def download():
-    apk = apk_file()
-    if apk:
-        return FileResponse(apk, media_type="application/vnd.android.package-archive", filename="alyanovel.apk")
-    if APP_DOWNLOAD_URL:
-        return RedirectResponse(APP_DOWNLOAD_URL, 302)
+    release = apk_file()
+    if release:
+        _, apk = release
+        return FileResponse(
+            apk,
+            media_type="application/vnd.android.package-archive",
+            filename=apk.name,
+        )
     raise HTTPException(404, "Файл приложения пока не загружен")
 
 

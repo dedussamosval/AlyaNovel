@@ -13,6 +13,7 @@ import kotlinx.coroutines.withContext
 import org.dedussamosval.alya.AppContainer
 import org.dedussamosval.alya.data.Chapter
 import org.dedussamosval.alya.data.Keys
+import org.dedussamosval.alya.data.ReaderPosition
 import org.dedussamosval.alya.data.WifiOnlyException
 import org.dedussamosval.alya.formats.ChapterFiles
 import org.dedussamosval.alya.formats.FormatException
@@ -142,6 +143,20 @@ class ReaderViewModel(private val c: AppContainer, private val chapterId: Int) :
         val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(f.path, o)
         return if (o.outWidth > 0 && o.outHeight > 0) o.outWidth.toFloat() / o.outHeight else 0.75f
+    }
+
+    suspend fun getReaderPosition(): ReaderPosition? = c.settings.getReaderPosition(chapterId)
+
+    fun saveReaderPosition(index: Int, offset: Int) {
+        viewModelScope.launch {
+            c.settings.saveReaderPosition(chapterId, index, offset)
+        }
+    }
+
+    fun clearReaderPosition() {
+        viewModelScope.launch {
+            c.settings.clearReaderPosition(chapterId)
+        }
     }
 
     // ───── оформление текста (общие настройки: те же, что в «Настройки → Оформление») ─────

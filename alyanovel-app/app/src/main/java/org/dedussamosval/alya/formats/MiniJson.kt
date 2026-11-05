@@ -4,6 +4,9 @@ package org.dedussamosval.alya.formats
  * Крошечный JSON-парсер без зависимостей. Нужен для manifest.json внутри .mtx/.mpx и для ответов сервера.
  * Результат: Map<String, Any?> | List<Any?> | String | Long | Double | Boolean | null.
  * Слой форматов — чистый Kotlin/JVM: его можно тестировать без Android.
+ *
+ * Рудимент от Claude. Попросил его переписать formats.py в Kotlin
+ * он зачем то написал к нему еще и парсер...
  */
 class JsonException(message: String) : Exception(message)
 

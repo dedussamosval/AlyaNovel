@@ -11,10 +11,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.TextFields
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -28,9 +30,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -43,9 +49,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import org.dedussamosval.alya.App
 import org.dedussamosval.alya.data.Prefs
+import org.dedussamosval.alya.data.ReaderPosition
 import org.dedussamosval.alya.ui.appViewModel
 import org.dedussamosval.alya.ui.components.EmptyState
 
@@ -59,6 +70,21 @@ fun ReaderScreen(chapterId: Int, onBack: () -> Unit, onOpenChapter: (Int) -> Uni
     val state by vm.state.collectAsState()
     val container = (LocalContext.current.applicationContext as App).container
     val prefs by container.settings.flow.collectAsState(initial = Prefs())
+
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+
+    var savedPosition by remember(chapterId) {
+        mutableStateOf<ReaderPosition?>(null)
+    }
+    var positionLoaded by remember(chapterId) {
+        mutableStateOf(false)
+    }
+
+    LaunchedEffect(chapterId) {
+        savedPosition = vm.getReaderPosition()
+        positionLoaded = true
+    }
 
     val title = vm.chapter?.let { "Том ${it.volumeNumber} · ${it.label}" } ?: "Глава"
 
@@ -77,6 +103,17 @@ fun ReaderScreen(chapterId: Int, onBack: () -> Unit, onOpenChapter: (Int) -> Uni
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = {
+                            scope.launch { listState.animateScrollToItem(0) }
+                        },
+                    ) {
+                        Icon(
+                            Icons.Rounded.ArrowUpward,
+                            contentDescription = "Вернуться наверх",
+                        )
+                    }
+
                     if (canStyleText) {
                         IconButton(onClick = { showTextSettings = true }) {
                             Icon(Icons.Rounded.TextFields, contentDescription = "Шрифт и размер текста")
@@ -108,6 +145,12 @@ fun ReaderScreen(chapterId: Int, onBack: () -> Unit, onOpenChapter: (Int) -> Uni
 
                 is ReaderState.Ready -> ReaderContent(
                     state = s,
+                    listState = listState,
+                    savedPosition = savedPosition,
+                    positionLoaded = positionLoaded,
+                    onSavePosition = vm::saveReaderPosition,
+                    onClearPosition = vm::clearReaderPosition,
+                    chapterId = chapterId,
                     fontSize = prefs.fontSize,
                     fontFamily = fontFamilyOf(prefs.fontFamily),
                     lineSpacing = prefs.lineSpacing,
@@ -130,9 +173,16 @@ fun ReaderScreen(chapterId: Int, onBack: () -> Unit, onOpenChapter: (Int) -> Uni
     }
 }
 
+@OptIn(FlowPreview::class)
 @Composable
 private fun ReaderContent(
     state: ReaderState.Ready,
+    listState: LazyListState,
+    savedPosition: ReaderPosition?,
+    positionLoaded: Boolean,
+    onSavePosition: (index: Int, offset: Int) -> Unit,
+    onClearPosition: () -> Unit,
+    chapterId: Int,
     fontSize: Int,
     fontFamily: FontFamily,
     lineSpacing: Int,
@@ -142,8 +192,56 @@ private fun ReaderContent(
 ) {
     // Манга — лента страниц во всю ширину без полей; ранобэ — текст с полями и скруглёнными иллюстрациями
     val sidePadding = if (state.isManga) 0.dp else 20.dp
-    val listState = rememberLazyListState()
+//    val listState = rememberLazyListState()
     val pages = state.items.size
+
+    var restored by remember(chapterId) {
+        mutableStateOf(false)
+    }
+
+    LaunchedEffect(positionLoaded, savedPosition, state.items.size, state.done) {
+        if (!positionLoaded || restored) return@LaunchedEffect
+
+        val position = savedPosition
+
+        // Для ранобэ ждём, пока загрузится сохранённый элемент.
+        // Если глава уже загружена целиком, восстанавливаем позицию в любом случае.
+        val canRestore =
+            position == null ||
+                    position.index < state.items.size ||
+                    state.done
+
+        if (canRestore) {
+            if (position != null) {
+                listState.scrollToItem(
+                    index = position.index.coerceIn(0, state.items.size),
+                    scrollOffset = position.offset,
+                )
+            }
+            restored = true
+        }
+    }
+
+    LaunchedEffect(chapterId, restored, state.done) {
+        if (!restored) return@LaunchedEffect
+
+        snapshotFlow {
+            Triple(
+                listState.firstVisibleItemIndex,
+                listState.firstVisibleItemScrollOffset,
+                state.done && !listState.canScrollForward,
+            )
+        }
+            .distinctUntilChanged()
+            .debounce(500)
+            .collect { (index, offset, atEnd) ->
+                if (atEnd) {
+                    onClearPosition()
+                } else {
+                    onSavePosition(index, offset)
+                }
+            }
+    }
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(

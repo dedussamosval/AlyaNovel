@@ -21,10 +21,20 @@ android {
         applicationId = "org.dedussamosval.alya"
         minSdk = 26
         targetSdk = 35
-        versionCode = 11
-        versionName = "0.2.12-beta"
+        versionCode = 12
+        versionName = "0.2.13-beta"
         buildConfigField("String", "SERVER_URL", quoted(serverUrl))
     }
+
+    signingConfigs {
+        create("release") {
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+            enableV4Signing = true
+        }
+    }
+
 
     buildTypes {
         debug {
@@ -34,7 +44,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Подпись релиза настройте в Android Studio: Build → Generate Signed App Bundle / APK
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 

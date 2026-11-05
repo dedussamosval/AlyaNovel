@@ -14,6 +14,7 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import java.io.IOException
 
@@ -26,7 +27,7 @@ private val Context.dataStore by preferencesDataStore(name = "settings")
 
 
 
-const val TOS_VERSION = "2026-10-23"
+const val TOS_VERSION = "2026-11-04"
 
 object Keys {
     val NOTIFY_CHAPTERS = booleanPreferencesKey("notify_chapters")
@@ -59,6 +60,11 @@ data class Prefs(
     val readIds: Set<Int> = emptySet(),
     val tosAccepted: String = "",
 )
+
+data class ReaderPosition(val index: Int, val offset: Int)
+
+private fun readerPositionKey(chapterId: Int) =
+    stringPreferencesKey("reader_position_$chapterId")
 
 class SettingsStore(private val context: Context) {
 
@@ -118,6 +124,29 @@ class SettingsStore(private val context: Context) {
     suspend fun advanceLastSeen(ts: Long) {
         context.dataStore.edit {
             if (ts > (it[Keys.LAST_SEEN] ?: 0L)) it[Keys.LAST_SEEN] = ts
+        }
+    }
+
+    /** Запоминает позицию внутри главы для продолжения чтения */
+    suspend fun getReaderPosition(chapterId: Int): ReaderPosition? {
+        val raw = context.dataStore.data.first()[readerPositionKey(chapterId)] ?: return null
+        val parts = raw.split(':', limit = 2)
+        if (parts.size != 2) return null
+
+        val index = parts[0].toIntOrNull() ?: return null
+        val offset = parts[1].toIntOrNull() ?: return null
+        return ReaderPosition(index, offset)
+    }
+
+    suspend fun saveReaderPosition(chapterId: Int, index: Int, offset: Int) {
+        context.dataStore.edit {
+            it[readerPositionKey(chapterId)] = "$index:$offset"
+        }
+    }
+
+    suspend fun clearReaderPosition(chapterId: Int) {
+        context.dataStore.edit {
+            it.remove(readerPositionKey(chapterId))
         }
     }
 }

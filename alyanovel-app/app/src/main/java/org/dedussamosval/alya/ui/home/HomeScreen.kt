@@ -14,8 +14,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DownloadDone
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -29,9 +31,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import org.dedussamosval.alya.data.Chapter
@@ -50,6 +56,11 @@ import org.dedussamosval.alya.ui.components.SiteCard
 fun HomeScreen(listState: LazyListState, onOpenChapter: (Int) -> Unit, snackbar: SnackbarHostState) {
     val vm = appViewModel { HomeViewModel(it) }
     val ui by vm.ui.collectAsState()
+
+    // Пустой набор при первом запуске: все тома свернуты.
+    var expandedVolumeIds by rememberSaveable(ui.kind) {
+        mutableStateOf(emptySet<Int>())
+    }
 
     LaunchedEffect(vm) { vm.messages.collect { snackbar.showSnackbar(it) } }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refreshDownloaded() }
@@ -112,6 +123,15 @@ fun HomeScreen(listState: LazyListState, onOpenChapter: (Int) -> Unit, snackbar:
                     VolumeCard(
                         volume = volume,
                         ui = ui,
+                        expanded = volume.id in expandedVolumeIds,
+                        onToggle = {
+                            expandedVolumeIds =
+                                if (volume.id in expandedVolumeIds) {
+                                    expandedVolumeIds - volume.id
+                                } else {
+                                    expandedVolumeIds + volume.id
+                                }
+                        },
                         onOpen = onOpenChapter,
                         onDownload = { vm.download(it) },
                     )
@@ -122,41 +142,70 @@ fun HomeScreen(listState: LazyListState, onOpenChapter: (Int) -> Unit, snackbar:
 }
 
 @Composable
-private fun VolumeCard(volume: Volume, ui: HomeUi, onOpen: (Int) -> Unit, onDownload: (Chapter) -> Unit) {
+private fun VolumeCard(
+    volume: Volume,
+    ui: HomeUi,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onOpen: (Int) -> Unit,
+    onDownload: (Chapter) -> Unit,
+) {
     SiteCard {
         Row(
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 10.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onToggle)
+                .padding(start = 16.dp, end = 12.dp, top = 14.dp, bottom = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Том ${volume.number}", style = MaterialTheme.typography.titleMedium)
-            if (volume.title.isNotBlank()) {
+            Column(Modifier.weight(1f)) {
                 Text(
-                    "  ·  ${volume.title}",
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = buildString {
+                        append("Том ${volume.number}")
+                        if (volume.title.isNotBlank()) append(" · ${volume.title}")
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "${volume.chapters.size} глав",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+
+            Icon(
+                imageVector = if (expanded) Icons.Rounded.ExpandMore else Icons.Rounded.ChevronRight,
+                contentDescription = if (expanded) "Свернуть том" else "Развернуть том",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
-        volume.chapters.forEachIndexed { index, ch ->
-            // перед первой экстра-главой — подзаголовок: это дополнительные главы вне рамок сюжета
-            if (ch.type == TYPE_EXTRA && volume.chapters.getOrNull(index - 1)?.type != TYPE_EXTRA) {
+
+        if (expanded) {
+            volume.chapters.forEachIndexed { index, ch ->
+                if (ch.type == TYPE_EXTRA &&
+                    volume.chapters.getOrNull(index - 1)?.type != TYPE_EXTRA
+                ) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Text(
+                        "Дополнительные главы",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 2.dp),
+                    )
+                }
+
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                Text(
-                    "Дополнительные главы",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 2.dp),
+                ChapterRow(
+                    chapter = ch,
+                    read = ch.id in ui.readIds,
+                    downloaded = ch.id in ui.downloaded,
+                    progress = ui.progress[ch.id],
+                    onOpen = { onOpen(ch.id) },
+                    onDownload = { onDownload(ch) },
                 )
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            ChapterRow(
-                chapter = ch,
-                read = ch.id in ui.readIds,
-                downloaded = ch.id in ui.downloaded,
-                progress = ui.progress[ch.id],
-                onOpen = { onOpen(ch.id) },
-                onDownload = { onDownload(ch) },
-            )
         }
     }
 }

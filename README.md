@@ -1,5 +1,3 @@
-> Пока предварительная версия, еще дорабатываю
-
 <p align="center">
   <img src="docs/header.svg" alt="AlyaNovel — Python 3.13 · Kotlin · версия 0.2.11-beta" width="880">
 </p>
@@ -14,8 +12,7 @@
   <a href="#часть-2-техническая-часть">Техническая часть</a>
 </p>
 
-<!-- Скриншоты: положите картинки в docs/screenshots/ и вставьте сюда, например:
-<p align="center"><img src="docs/screenshots/home.png" width="240"> <img src="docs/screenshots/reader.png" width="240"> <img src="docs/screenshots/chat.png" width="240"></p> -->
+<p align="center"><img src="docs/screenshots/home.jpg" width="240"> <img src="docs/screenshots/reader.jpg" width="240"></p>
 
 ---
 
@@ -175,7 +172,7 @@ WebSocket `/ws/chat`: клиент шлёт текст, сервер сохра�
 - **Части текста.** Текст режется на `0001.txt`, `0002.txt`… по размеру (по умолчанию 32 КБ) строго по границам строк; склейка частей даёт исходный текст дословно.
 - **Иллюстрации** в тексте — отдельная строка `![подпись](img:N)`, где `N` — номер файла из `images`. Картинки можно вставлять ссылками (postimg.cc, imgur.com): сервер сам скачивает их и кладёт внутрь файла.
 - **Типы глав и коды файлов:** пролог `R01-P`, глава `R01-03`, эпилог `R01-E`, экстра `R01-A01` (`M…` вместо `R` — для манги). Порядок в томе: пролог → главы → эпилог → экстра.
-- **Версии.** Версия `.mtx` — 4 (иллюстрации необязательны, глава может быть просто текстом); старые версии 1 и 2 читаются как раньше. Файл новее, чем знает клиент, приложение
+- **Версии.** Версия `.mtx` — 4 (иллюстрации необязательны, глава может быть просто текстом); старые версии 1-3 читаются как раньше. Файл новее, чем знает клиент, приложение
   не открывает, а просит обновиться.
 
 Полное описание API и форматов — в [/docs/PROTOCOL.md](docs/PROTOCOL.md).
@@ -229,7 +226,7 @@ export BOT_USERNAME=my_bot
 export SECRET_KEY=$(python -c "import secrets; print(secrets.token_hex(32))")
 export HTTPS_ONLY=1                        # за reverse proxy с HTTPS
 
-uvicorn server.main:app --host 127.0.0.1 --port 8000
+uvicorn server.main:app --proxy-headers --forwarded-allow-ips 127.0.0.1 --host 127.0.0.1 --port 8000
 ```
 
 В Windows PowerShell переменные задаются так: `$env:BOT_TOKEN="..."`. Админ-панель: `https://ваш-домен/admin`.
@@ -280,20 +277,13 @@ cd alyanovel-android
 ./gradlew assembleRelease -PserverUrl=https://alya.example.com      # release (нужна подпись)
 ```
 
-- Адрес сервера задаётся в `gradle.properties`: `serverUrl` (release, только HTTPS) и `debugServerUrl` (по умолчанию `http://10.0.2.2:8000` — ваш компьютер из эмулятора;
+- Адрес сервера задаётся в `gradle.properties`: `serverUrl` (release, только HTTPS) и `debugServerUrl` (по умолчанию `http://192.168.31.36:8000` — ваш компьютер из эмулятора (адрес можно посмотреть в настройках сети);
   для телефона по Wi-Fi укажите IP компьютера: `-PdebugServerUrl=http://192.168.1.50:8000`). В debug-сборке разрешён HTTP, в release — нет.
 - Подпись релиза: Android Studio → **Build → Generate Signed App Bundle / APK**. Keystore в репозиторий не добавляйте.
 - Версия: `versionName` и `versionCode` в `app/build.gradle.kts`; последнюю версию для проверки обновлений сообщайте серверу через `APP_LATEST_VERSION`.
 - Иконка: `python alyanovel-android/tools/make_icons.py logo.png` (подробности — в заголовке скрипта).
 
-### Тесты
 
-```bash
-python tests_smoke.py       # API, админка, чат, типы глав, миграция
-python tests_images.py      # картинки по ссылкам, прокси, imgur
-python tests_push.py        # push через FCM (фейковые эндпоинты Google)
-cd alyanovel-android && ./gradlew test      # слой форматов и модели на Kotlin
-```
 
 ## Структура репозитория
 
@@ -313,7 +303,7 @@ docs/    заголовок README и описание протокола кли
 | Что | Версия |
 |---|---|
 | Приложение | 0.2.12-beta |
-| Формат `.mtx` | 4 (читаются 1, 2, 3) |
+| Формат `.mtx` | 4 (читаются 1 - 3) |
 | Формат `.mpx` | 1 |
 | Python / Kotlin | 3.13 / 2.0 |
 | Android | от 8.0 (API 26) |
@@ -329,6 +319,20 @@ docs/    заголовок README и описание протокола кли
 - [ ] Постраничный режим манги с учётом направления чтения
 - [ ] Закладки и запоминание места, где остановились
 - [ ] Фоновые уведомления о сообщениях чата
+
+---
+
+> Licensed under the Apache License, Version 2.0 (the "License");
+> you may not use this file except in compliance with the License.
+> You may obtain a copy of the License at
+> 
+>   http://www.apache.org/licenses/LICENSE-2.0
+> 
+> Unless required by applicable law or agreed to in writing, software
+> distributed under the License is distributed on an "AS IS" BASIS,
+> WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+> See the License for the specific language governing permissions and
+> limitations under the License.
 
 ---
 

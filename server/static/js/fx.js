@@ -107,4 +107,16 @@
       if (el.getBoundingClientRect().top > innerHeight) { el.classList.add('reveal'); io.observe(el); }
     });
   }
+
+  /* ── Меню: закрытие по касанию снаружи, Esc и выбору ссылки ── */
+  const menu = document.getElementById('menu');
+  if (menu) {
+    document.addEventListener('pointerdown', e => {
+      if (menu.open && !menu.contains(e.target)) menu.open = false;
+    }, { passive: true });
+    addEventListener('keydown', e => { if (e.key === 'Escape') menu.open = false; });
+    menu.querySelectorAll('nav a').forEach(a =>
+      a.addEventListener('click', () => { menu.open = false; })
+    );
+  }
 })();

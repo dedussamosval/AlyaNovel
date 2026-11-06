@@ -414,8 +414,6 @@ async def chapter_create(volume_id: int = Form(), number: str = Form(""), chapte
             fmt = "mtx"
         else:
             files = [await f.read() for f in images if f.filename]
-            files = [f for _, f in sorted(zip([u.filename for u in images if u.filename], files),
-                                          key=lambda p: p[0].lower())]  # порядок страниц — по имени файла
             blob = formats.build_mpx(files, title=title, volume=vol["number"], chapter=number,
                                      direction=direction, chapter_type=chapter_type)
             fmt = "mpx"

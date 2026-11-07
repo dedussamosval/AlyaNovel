@@ -5,6 +5,7 @@
 /alyanovel-app/local.properties
 /.idea/
 /.venv/
+/.pytest_cache/
 .DS_Store
 /build/
 /alyanovel-app/build/

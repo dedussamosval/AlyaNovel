@@ -1,0 +1,5 @@
+pytest
+httpx
+cryptography
+fastapi
+python-dotenv

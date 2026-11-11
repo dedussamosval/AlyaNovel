@@ -225,3 +225,92 @@
   color: var(--acc);
   border-color: var(--acc);
 }
+
+.schedule {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--bd);
+}
+
+.schedule-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--fg);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.schedule-toggle input {
+  width: auto;
+  margin: 0;
+  padding: 0;
+}
+
+#publish-at {
+  color-scheme: light dark;
+}
+
+.schedule-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.schedule-presets button {
+  margin: 0;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+
+.badge-sched {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border: 1px solid var(--acc);
+  border-radius: 999px;
+  color: var(--acc);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.row-actions form {
+  margin: 0;
+}
+
+.row-actions button {
+  margin: 0;
+  padding: 5px 10px;
+}
+
+.notice-card summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 1.17em;
+}
+
+.notice-card summary small {
+  color: var(--mut);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.notice-content {
+  margin-top: 12px;
+}

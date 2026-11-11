@@ -1,5 +1,12 @@
 package org.dedussamosval.alya.ui.reader
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,21 +19,31 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.Bookmark
+import androidx.compose.material.icons.rounded.Bookmarks
+import androidx.compose.material.icons.rounded.BookmarkBorder
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.TextFields
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -37,15 +54,22 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -55,6 +79,7 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import org.dedussamosval.alya.App
+import org.dedussamosval.alya.data.Bookmark
 import org.dedussamosval.alya.data.Prefs
 import org.dedussamosval.alya.data.ReaderPosition
 import org.dedussamosval.alya.ui.appViewModel
@@ -92,6 +117,11 @@ fun ReaderScreen(chapterId: Int, onBack: () -> Unit, onOpenChapter: (Int) -> Uni
     val canStyleText = (state as? ReaderState.Ready)?.isManga == false
     var showTextSettings by rememberSaveable { mutableStateOf(false) }
 
+    val bookmarks by vm.bookmarks.collectAsState()
+    var showBookmarks by rememberSaveable { mutableStateOf(false) }
+    var bookmarkTarget by remember { mutableStateOf<Int?>(null) }
+
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
@@ -103,6 +133,10 @@ fun ReaderScreen(chapterId: Int, onBack: () -> Unit, onOpenChapter: (Int) -> Uni
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showBookmarks = true }) {
+                        Icon(Icons.Rounded.Bookmarks, contentDescription = "Закладки")
+                    }
+
                     IconButton(
                         onClick = {
                             scope.launch { listState.animateScrollToItem(0) }
@@ -157,6 +191,8 @@ fun ReaderScreen(chapterId: Int, onBack: () -> Unit, onOpenChapter: (Int) -> Uni
                     prev = vm.neighbors.first?.id,
                     next = vm.neighbors.second?.id,
                     onOpenChapter = onOpenChapter,
+                    marked = remember(bookmarks) { bookmarks.mapTo(HashSet()) { it.itemIndex } },
+                    onParagraphLongPress = { bookmarkTarget = it}
                 )
             }
         }
@@ -170,6 +206,68 @@ fun ReaderScreen(chapterId: Int, onBack: () -> Unit, onOpenChapter: (Int) -> Uni
             onLineSpacing = vm::setLineSpacing,
             onDismiss = { showTextSettings = false },
         )
+    }
+
+    bookmarkTarget?.let { index ->
+        val existing = bookmarks.firstOrNull { it.itemIndex == index }
+        val text = ((vm.state.value as? ReaderState.Ready)?.items?.getOrNull(index) as? ReaderItem.Paragraph)?.text.orEmpty()
+        AlertDialog(
+            onDismissRequest = { bookmarkTarget = null },
+            title = { Text(if (existing == null) "Добавить закладку?" else "Убрать закладку?") },
+            text = { Text(text, maxLines = 4, overflow = TextOverflow.Ellipsis) },
+            confirmButton = {
+                TextButton(onClick = { vm.toggleBookmark(index); bookmarkTarget = null }) {
+                    Text(if (existing == null) "Добавить" else "Убрать")
+                }
+            },
+            dismissButton = { TextButton(onClick = { bookmarkTarget = null }) { Text("Отмена") } },
+        )
+    }
+
+    if (showBookmarks) {
+        val here = listState.firstVisibleItemIndex
+        BookmarksSheet(
+            items = bookmarks,
+            hasHere = bookmarks.any { it.itemIndex == here },
+            onToggleHere = { vm.toggleBookmark(here) },
+            onJump = { b ->
+                showBookmarks = false
+                scope.launch {
+                    vm.awaitItem(b.itemIndex)
+                    listState.animateScrollToItem(b.itemIndex.coerceAtMost(listState.layoutInfo.totalItemsCount - 1))
+                }
+            },
+            onDelete = vm::removeBookmark,
+            onDismiss = { showBookmarks = false },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BookmarksSheet(
+    items: List<Bookmark>, hasHere: Boolean,
+    onToggleHere: () -> Unit, onJump: (Bookmark) -> Unit, onDelete: (Bookmark) -> Unit, onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+            TextButton(onClick = onToggleHere, modifier = Modifier.padding(horizontal = 8.dp)) {
+            Icon(if (hasHere) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder, null)
+            Text(if (hasHere) "  Убрать закладку отсюда" else "  Добавить закладку сюда")
+        }
+        if (items.isEmpty()) {
+            Text("Закладок в этой главе пока нет", Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
+            items(items, key = { it.id }) { b ->
+                ListItem(
+                    headlineContent = { Text(b.preview, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                    trailingContent = {
+                        IconButton(onClick = { onDelete(b) }) { Icon(Icons.Rounded.Delete, "Удалить") }
+                    },
+                    modifier = Modifier.clickable { onJump(b) },
+                )
+            }
+        }
     }
 }
 
@@ -189,6 +287,8 @@ private fun ReaderContent(
     prev: Int?,
     next: Int?,
     onOpenChapter: (Int) -> Unit,
+    marked: Set<Int>,
+    onParagraphLongPress: (Int) -> Unit,
 ) {
     // Манга — лента страниц во всю ширину без полей; ранобэ — текст с полями и скруглёнными иллюстрациями
     val sidePadding = if (state.isManga) 0.dp else 20.dp
@@ -198,6 +298,12 @@ private fun ReaderContent(
     var restored by remember(chapterId) {
         mutableStateOf(false)
     }
+    // Зум для страниц с мангой и иллюстраций ранобэ
+    val zoom = remember(chapterId) { ZoomState() }
+    var fullImage by remember { mutableStateOf<ReaderItem.Picture?>(null) }
+
+    val haptic = LocalHapticFeedback.current
+    val longPress by rememberUpdatedState(onParagraphLongPress)
 
     LaunchedEffect(positionLoaded, savedPosition, state.items.size, state.done) {
         if (!positionLoaded || restored) return@LaunchedEffect
@@ -243,14 +349,21 @@ private fun ReaderContent(
             }
     }
 
-    Box(Modifier.fillMaxSize()) {
+    Box(
+        Modifier.fillMaxSize().clipToBounds().then(
+            if (state.isManga) Modifier
+                .pointerInput(zoom) { detectTapGestures(onDoubleTap = { zoom.toggle() }) }
+                .zoomGestures(zoom, listMode = true)
+            else Modifier
+        )
+    ) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().then(if (state.isManga) Modifier.zoomLayer(zoom) else Modifier),
             contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(if (state.isManga) MANGA_PAGE_GAP else 14.dp),
         ) {
-            itemsIndexed(state.items) { _, item ->
+            itemsIndexed(state.items) { index, item ->
                 when (item) {
                     is ReaderItem.Paragraph -> Text(
                         text = item.text,
@@ -259,7 +372,25 @@ private fun ReaderContent(
                             lineHeight = (fontSize * lineSpacing / 100f).sp,
                             fontFamily = fontFamily,
                         ),
-                        modifier = Modifier.padding(horizontal = sidePadding),
+                        modifier = Modifier
+                            .padding(horizontal = sidePadding)
+                            .pointerInput(index) {
+                                awaitEachGesture {
+                                    val down = awaitFirstDown(requireUnconsumed = false)
+                                    val press = awaitLongPressOrCancellation(down.id)   // null: палец ушёл или это скролл
+                                    if (press != null) {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        longPress(index)
+                                        waitForUpOrCancellation()?.consume()        // отпускание не должно срабатывать как тап
+                                    }
+                                }
+                            }
+                            .then(
+                                if (index in marked) Modifier
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
+                                    .padding(4.dp)
+                                else Modifier
+                            ),
                     )
 
                     is ReaderItem.Header -> {
@@ -284,13 +415,14 @@ private fun ReaderContent(
 
                     is ReaderItem.Picture -> Column(Modifier.padding(horizontal = if (state.isManga) 0.dp else 12.dp)) {
                         AsyncImage(
-                            model = item.file,
+                            model = if (state.isManga) hiRes(item.file) else item.file,   // манга — в высоком разрешении
                             contentDescription = item.caption.ifBlank { null },
                             contentScale = ContentScale.FillWidth,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(item.aspect)
-                                .clip(if (state.isManga) androidx.compose.ui.graphics.RectangleShape else MaterialTheme.shapes.medium),
+                                .clip(if (state.isManga) RectangleShape else MaterialTheme.shapes.medium)
+                                .then(if (state.isManga) Modifier else Modifier.clickable { fullImage = item }),
                         )
                         if (item.caption.isNotBlank()) {
                             Text(
@@ -346,5 +478,8 @@ private fun ReaderContent(
                 else "${(index * 100f / (total - 1).coerceAtLeast(1)).roundToInt()}%"
             },
         )
+
+        fullImage?.let { FullImageDialog(it.file, it.caption) { fullImage = null } }
+
     }
 }

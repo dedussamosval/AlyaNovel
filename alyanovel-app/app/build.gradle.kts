@@ -21,8 +21,8 @@ android {
         applicationId = "org.dedussamosval.alya"
         minSdk = 26
         targetSdk = 35
-        versionCode = 12
-        versionName = "0.2.13-beta"
+        versionCode = 13
+        versionName = "0.2.14-beta"
         buildConfigField("String", "SERVER_URL", quoted(serverUrl))
     }
 

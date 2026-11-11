@@ -103,7 +103,7 @@ fun TextSettingsSheet(
             )
 
             Text(
-                "Так будет выглядеть текст главы: быстрая бурая лиса перепрыгнула через ленивую собаку.",
+                "Так будет выглядеть текст главы: съешь же ещё этих мягких французских булок, да выпей чаю.",
                 style = MaterialTheme.typography.bodyLarge.copy(
                     fontSize = size.sp,
                     lineHeight = (size * spacing / 100f).sp,

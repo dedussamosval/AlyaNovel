@@ -6,11 +6,14 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.dedussamosval.alya.AppContainer
+import org.dedussamosval.alya.data.Bookmark
 import org.dedussamosval.alya.data.Chapter
 import org.dedussamosval.alya.data.Keys
 import org.dedussamosval.alya.data.ReaderPosition
@@ -25,6 +28,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.UUID
 
 sealed interface ReaderItem {
     data class Paragraph(val text: String) : ReaderItem
@@ -52,6 +56,9 @@ class ReaderViewModel(private val c: AppContainer, private val chapterId: Int) :
 
     val chapter: Chapter? = c.catalog.findChapter(chapterId)
     val neighbors: Pair<Chapter?, Chapter?> = chapter?.let { c.catalog.neighbors(it) } ?: (null to null)
+
+    val bookmarks: StateFlow<List<Bookmark>> =
+        c.bookmarks.forChapter(chapterId).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private var deleteOnClose = false
 
@@ -143,6 +150,30 @@ class ReaderViewModel(private val c: AppContainer, private val chapterId: Int) :
         val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(f.path, o)
         return if (o.outWidth > 0 && o.outHeight > 0) o.outWidth.toFloat() / o.outHeight else 0.75f
+    }
+
+    fun toggleBookmark(index: Int) {
+        val s = _state.value as? ReaderState.Ready ?: return
+        val item = s.items.getOrNull(index) ?: return
+        val existing = bookmarks.value.firstOrNull { it.itemIndex == index }
+        val preview = when (item) {
+            is ReaderItem.Paragraph -> item.text.take(80)
+            is ReaderItem.Header -> item.label
+            is ReaderItem.Picture -> item.caption.ifBlank { if (s.isManga) "Страница $index" else "Иллюстрация" }
+            is ReaderItem.Missing -> item.caption.ifBlank { "Иллюстрация" }
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            if (existing != null) c.bookmarks.remove(existing.id)
+            else c.bookmarks.add(Bookmark(UUID.randomUUID().toString(), chapterId, index, preview, System.currentTimeMillis()))
+        }
+    }
+
+    fun removeBookmark(b: Bookmark) {
+        viewModelScope.launch(Dispatchers.IO) { c.bookmarks.remove(b.id) }
+    }
+
+    suspend fun awaitItem(index: Int) {
+        _state.first { it is ReaderState.Ready && (index < it.items.size || it.done) }
     }
 
     suspend fun getReaderPosition(): ReaderPosition? = c.settings.getReaderPosition(chapterId)

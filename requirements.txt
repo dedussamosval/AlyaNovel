@@ -10,3 +10,4 @@ websocket-client
 cryptography
 python-dotenv
 plyer
+tzdata; sys_platform == "win32"

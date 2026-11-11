@@ -35,7 +35,6 @@ SECURITY_HEADERS = {
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "same-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
-    # в админке есть inline-обработчики (onchange/onsubmit), поэтому script-src 'unsafe-inline'; всё остальное — только со своего домена
     "Content-Security-Policy": ("default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; "
                                 "script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"),
 }

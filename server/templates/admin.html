@@ -49,7 +49,8 @@
   <h3>Добавить / заменить главу</h3>
 
   <form id="chapter-form" method="post" action="/admin/chapters"
-        enctype="multipart/form-data">
+        enctype="multipart/form-data"
+        data-server-now="{{ server_now }}" data-publish-tz="{{ publish_tz }}">
     <div class="row">
       <div>
         <label for="volume-select">Том</label>
@@ -129,6 +130,27 @@
       </select>
     </section>
 
+      <div class="schedule">
+      <label class="schedule-toggle" for="schedule-toggle">
+        <input id="schedule-toggle" type="checkbox">
+        Опубликовать позже
+      </label>
+
+      <div id="schedule-fields" hidden>
+        <label for="publish-at">Дата и время ({{ publish_tz }})</label>
+        <input id="publish-at" name="publish_at" type="datetime-local" disabled>
+
+        <div class="schedule-presets">
+          <button type="button" class="g" data-add-minutes="60">Через час</button>
+          <button type="button" class="g" data-day="0" data-time="20:00">Сегодня 20:00</button>
+          <button type="button" class="g" data-day="1" data-time="12:00">Завтра 12:00</button>
+          <button type="button" class="g" data-add-minutes="10080">Через неделю</button>
+        </div>
+
+        <p id="schedule-summary" class="hint" aria-live="polite"></p>
+      </div>
+    </div>
+
     <div class="upload-progress" id="upload-progress" hidden>
       <progress id="upload-progress-bar" max="100" value="0"></progress>
       <span id="upload-progress-label">Подготовка загрузки…</span>
@@ -137,6 +159,59 @@
     <button id="save-chapter">Сохранить главу</button>
   </form>
 </div>
+
+<details class="card notice-card">
+  <summary>
+    <span>Центр уведомлений
+      {% if notices %}<small>({{ notices | length }})</small>{% endif %}
+    </span>
+  </summary>
+  <div class="notice-content">
+  <form id="notice-form" method="post" action="/admin/notices">
+    <div class="row">
+      <div>
+        <label for="notice-kind">Категория</label>
+        <select id="notice-kind" name="kind">
+          <option value="changelog">Обновление (список изменений)</option>
+          <option value="important">Важное уведомление</option>
+        </select>
+      </div>
+      <div id="notice-version-wrap">
+        <label for="notice-version">Версия</label>
+        <input id="notice-version" name="version" value="{{ app_version }}" maxlength="32">
+      </div>
+      <div id="notice-title-wrap" hidden>
+        <label for="notice-title">Заголовок</label>
+        <input id="notice-title" name="title" maxlength="100">
+      </div>
+    </div>
+
+    <label for="notice-body" id="notice-body-label">Что нового</label>
+    <textarea id="notice-body" name="body" rows="6" maxlength="4000"></textarea>
+
+    <p class="hint">Текст уведомления: <b id="notice-preview">—</b></p>
+    <button id="notice-send">Отправить всем</button>
+  </form>
+
+  {% if notices %}
+  <h3 style="margin-top:18px">Отправленные</h3>
+  {% for n in notices %}
+  <div class="ch">
+    <span>
+      <b>{{ 'Обновление' if n.kind == 'changelog' else 'Важное' }}</b>
+      · {{ n.version if n.kind == 'changelog' else n.title }}
+      <small class="chapter-meta">{{ n.when }} · {{ 'push ✓' if n.push_ok else 'push не ушёл' }}</small>
+    </span>
+    <form method="post" action="/admin/notices/{{ n.id }}/delete" class="delete-form"
+          data-confirm-title="Удалить объявление?"
+          data-confirm-detail="Уже отправленный push вернуть нельзя; из приложения объявление пропадёт.">
+      <button class="d" type="submit">Удалить</button>
+    </form>
+  </div>
+  {% endfor %}
+  {% endif %}
+</div>
+</details>
 
 <div class="volume-tools">
   <h2>Существующие тома</h2>
@@ -167,21 +242,31 @@
       {% set lbl = {'prologue': 'Пролог', 'epilogue': 'Эпилог'}.get(c.type)
                    or (('Экстра ' ~ c.number) if c.type == 'extra'
                        else ('Глава ' ~ c.number)) %}
-      <div class="ch chapter-row"
-           data-chapter-search="{{ c.code }} {{ lbl }} {{ c.title }}">
+        <div class="ch chapter-row" 
+              data-chapter-search="{{ c.code }} {{ lbl }} {{ c.title }}">
         <span>
           <b>{{ c.code }}</b> · {{ lbl }} {{ c.title }}
+          {% if c.scheduled %}
+          <span class="badge-sched" title="Скрыта от читателей до этого времени">⏳ {{ c.when }}</span>
+          {% endif %}
           <small class="chapter-meta">
             .{{ c.fmt }} · {{ (c.size / 1024) | round | int }} КБ
           </small>
         </span>
 
-        <form method="post" action="/admin/chapters/{{ c.id }}/delete"
-              class="delete-form"
-              data-confirm-title="Удалить {{ c.code }}?"
-              data-confirm-detail="{{ lbl }} {{ c.title }}">
-          <button class="d" type="submit">Удалить</button>
-        </form>
+        <div class="row-actions">
+          {% if c.scheduled %}
+          <form method="post" action="/admin/chapters/{{ c.id }}/publish-now" class="publish-form">
+            <button class="g" type="submit">Опубликовать сейчас</button>
+          </form>
+          {% endif %}
+          <form method="post" action="/admin/chapters/{{ c.id }}/delete"
+                class="delete-form"
+                data-confirm-title="Удалить {{ c.code }}?"
+                data-confirm-detail="{{ lbl }} {{ c.title }}">
+            <button class="d" type="submit">Удалить</button>
+          </form>
+        </div>
       </div>
     {% else %}
       <p class="empty-volume">Глав пока нет — том не виден в приложении.</p>

@@ -32,6 +32,11 @@ CREATE TABLE IF NOT EXISTS auth_requests(token TEXT PRIMARY KEY, tg_id INTEGER, 
 CREATE TABLE IF NOT EXISTS messages(
   id INTEGER PRIMARY KEY, tg_id INTEGER NOT NULL, name TEXT NOT NULL,
   text TEXT NOT NULL, created INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS notices(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL CHECK(kind IN ('changelog','important')),
+  version TEXT NOT NULL DEFAULT '', title TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '',
+  created INTEGER NOT NULL, push_ok INTEGER NOT NULL DEFAULT 0);
 """
 
 
@@ -54,6 +59,7 @@ def init():
         c.executescript(SCHEMA)
         _migrate_blobs_to_files(c)
         _migrate_chapter_types(c)
+        _migrate_publish_at(c)
         _migrate_session_hashes(c)
         c.execute("DELETE FROM sessions WHERE created<?", (now() - SESSION_TTL,))
     _harden_permissions()
@@ -61,6 +67,8 @@ def init():
 
 # Порядок глав внутри тома: пролог → главы → эпилог → экстра. Пригодится в любом SELECT: ORDER BY {ORDER_SQL}
 ORDER_SQL = "CASE type WHEN 'prologue' THEN 0 WHEN 'chapter' THEN 1 WHEN 'epilogue' THEN 2 ELSE 3 END, number"
+# Для отложенного публикования. Без алиасов — работает и в "FROM chapters", и в "chapters c JOIN volumes v"
+VISIBLE_SQL = "(publish_at IS NULL OR publish_at <= CAST(strftime('%s','now') AS INTEGER))"
 
 
 def _migrate_chapter_types(c):
@@ -96,6 +104,13 @@ def _migrate_session_hashes(c):
     """Старые сессии хранились открытым текстом (43 символа) — один раз заменяем их хэшами (64 символа), вход не слетает."""
     for r in c.execute("SELECT token FROM sessions WHERE length(token)!=64").fetchall():
         c.execute("UPDATE sessions SET token=? WHERE token=?", (hash_token(r["token"]), r["token"]))
+
+def _migrate_publish_at(c):
+    cols = {r["name"] for r in c.execute("PRAGMA table_info(chapters)")}
+    if "publish_at" not in cols:
+        c.execute("ALTER TABLE chapters ADD COLUMN publish_at INTEGER")     # NULL = сразу
+    if "notified" not in cols:
+        c.execute("ALTER TABLE chapters ADD COLUMN notified INTEGER NOT NULL DEFAULT 1")   # 0 = пуш ещё не ушёл
 
 def _harden_permissions() -> None:
     """База и файлы глав — только владельцу процесса (на Windows chmod почти ничего не меняет — это нормально)."""

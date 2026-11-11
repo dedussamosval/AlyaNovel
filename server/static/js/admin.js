@@ -19,6 +19,42 @@
     history.replaceState(null, "", location.pathname);
   }
 
+    const noticeForm = $("#notice-form");
+  if (noticeForm) {
+    const kindSelect = $("#notice-kind");
+    const versionInput = $("#notice-version");
+    const titleInput = $("#notice-title");
+    const bodyInput = $("#notice-body");
+    const sendButton = $("#notice-send");
+
+    const syncNotice = () => {
+      const isLog = kindSelect.value === "changelog";
+      $("#notice-version-wrap").hidden = !isLog;
+      $("#notice-title-wrap").hidden = isLog;
+      versionInput.required = isLog;
+      titleInput.required = !isLog;
+      bodyInput.required = isLog;
+      $("#notice-body-label").textContent = isLog
+        ? "Что нового (увидят в приложении)"
+        : "Текст (необязательно)";
+      $("#notice-preview").textContent = isLog
+        ? `Доступна новая версия. ${versionInput.value.trim() || "—"}`
+        : titleInput.value.trim() || "—";
+    };
+    noticeForm.addEventListener("input", syncNotice);
+    noticeForm.addEventListener("change", syncNotice);
+    syncNotice();
+
+    noticeForm.addEventListener("submit", (event) => {
+      if (!window.confirm("Отправить уведомление всем пользователям? Отозвать push будет нельзя.")) {
+        event.preventDefault();
+        return;
+      }
+      sendButton.disabled = true;           // защита от двойной отправки
+    });
+    window.addEventListener("pageshow", () => { sendButton.disabled = false; });
+  }
+
   const form = $("#chapter-form");
   if (!form) return;
 
@@ -372,10 +408,95 @@ imageInput.addEventListener("change", () => {
   function restoreSaveButton() {
     submitting = false;
     saveButton.disabled = false;
-    saveButton.textContent = "Сохранить главу";
+    saveButton.textContent = saveLabel();
     progressWrap.hidden = true;
     progressBar.value = 0;
   }
+
+    // ───── Отложенная публикация ─────
+  const scheduleToggle = $("#schedule-toggle");
+  const scheduleFields = $("#schedule-fields");
+  const publishAt = $("#publish-at");
+  const scheduleSummary = $("#schedule-summary");
+  const publishTz = form.dataset.publishTz || "";
+
+  // «Настенные» часы сервера: дата без зоны парсится как локальная, а нам нужны только числа
+  const clockBase = new Date(form.dataset.serverNow || Date.now());
+  const clockStart = Date.now();
+  const wallNow = () => new Date(clockBase.getTime() + (Date.now() - clockStart));
+  const pad = (n) => String(n).padStart(2, "0");
+  const toInputValue = (d) =>
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    `T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+  function saveLabel() {
+    return scheduleToggle?.checked ? "Запланировать главу" : "Сохранить главу";
+  }
+
+  function updateScheduleSummary() {
+    if (!scheduleToggle.checked) return;
+    const now = toInputValue(wallNow());
+    const value = publishAt.value;
+    publishAt.min = now;
+
+    let error = "";
+    if (!value) error = "Выберите дату и время публикации.";
+    else if (value <= now) error = "Это время уже прошло — выберите время в будущем.";
+
+    publishAt.setCustomValidity(error);   // блокирует отправку и при Ctrl+S
+    scheduleSummary.classList.toggle("file-error", Boolean(error));
+    scheduleSummary.textContent = error || (
+      "Глава появится " +
+      new Date(value).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) +
+      (publishTz ? ` (${publishTz})` : "") +
+      ". До этого читатели её не увидят, push уйдёт в момент публикации."
+    );
+  }
+
+  function syncSchedule() {
+    const on = scheduleToggle.checked;
+    scheduleFields.hidden = !on;
+    publishAt.disabled = !on;          // отключённое поле не попадает в FormData
+    publishAt.required = on;
+    if (!on) publishAt.setCustomValidity("");
+    if (!submitting) saveButton.textContent = saveLabel();
+    updateScheduleSummary();
+  }
+
+  function setPublishAt(date) {
+    publishAt.value = toInputValue(date);
+    updateScheduleSummary();
+  }
+
+  $$("[data-add-minutes]", scheduleFields).forEach((button) =>
+    button.addEventListener("click", () => {
+      const d = wallNow();
+      d.setMinutes(d.getMinutes() + Number(button.dataset.addMinutes));
+      setPublishAt(d);
+    })
+  );
+
+  $$("[data-day]", scheduleFields).forEach((button) =>
+    button.addEventListener("click", () => {
+      const d = wallNow();
+      const [h, m] = button.dataset.time.split(":").map(Number);
+      d.setDate(d.getDate() + Number(button.dataset.day));
+      d.setHours(h, m, 0, 0);
+      setPublishAt(d);
+    })
+  );
+
+  scheduleToggle.addEventListener("change", syncSchedule);
+  publishAt.addEventListener("input", updateScheduleSummary);
+  setInterval(updateScheduleSummary, 30000);
+
+  $$(".publish-form").forEach((publishForm) =>
+    publishForm.addEventListener("submit", (event) => {
+      if (!window.confirm("Опубликовать главу сейчас? Читатели получат уведомление.")) {
+        event.preventDefault();
+      }
+    })
+  );
 
   form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -465,8 +586,10 @@ imageInput.addEventListener("change", () => {
 
   window.addEventListener("pageshow", () => {
     restoreSaveButton();
+    syncSchedule();
   });
 
   updateFormMode();
   updateTextStats();
+  syncSchedule();
 })();

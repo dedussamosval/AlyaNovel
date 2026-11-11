@@ -8,6 +8,7 @@ import com.google.firebase.messaging.RemoteMessage
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.dedussamosval.alya.App
+import org.dedussamosval.alya.BuildConfig
 
 /**
  * Мгновенные уведомления о новых главах через Firebase Cloud Messaging.
@@ -15,14 +16,16 @@ import org.dedussamosval.alya.App
  * Фоновая проверка по расписанию (NewChaptersWorker) остаётся запасным путём — для телефонов без сервисов Google.
  */
 object Push {
-    /** Должно совпадать с FCM_TOPIC на сервере (по умолчанию new_chapters). */
+    /** Должно совпадать с FCM_TOPIC и NOTICE_TOPIC на сервере (по умолчанию new_chapters). */
     const val TOPIC = "new_chapters"
+    const val NOTICE_TOPIC = "app_notices"
 
     /** Подписка следует за переключателем «Новые главы». Без google-services.json Firebase не инициализирован — тихо выходим. */
     fun setSubscribed(context: Context, enabled: Boolean) {
         if (FirebaseApp.getApps(context).isEmpty()) return
         val messaging = FirebaseMessaging.getInstance()
-        if (enabled) messaging.subscribeToTopic(TOPIC) else messaging.unsubscribeFromTopic(TOPIC)
+        if (enabled) { messaging.subscribeToTopic(TOPIC); messaging.subscribeToTopic(NOTICE_TOPIC) }
+        else { messaging.unsubscribeFromTopic(TOPIC); messaging.unsubscribeFromTopic(NOTICE_TOPIC) }
     }
 }
 
@@ -50,6 +53,13 @@ class PushService : FirebaseMessagingService() {
                 Notifications.newChapter(applicationContext, item)
                 // Двигаем «последнее виденное», чтобы проверка по расписанию не повторила то же уведомление
                 runBlocking { container.settings.advanceLastSeen(item.created) }
+            }
+            "notice" -> {
+                val id = data["id"]?.toIntOrNull() ?: return
+                val kind = data["kind"].orEmpty()
+                val version = data["version"].orEmpty()
+                if (kind == NOTICE_CHANGELOG && !Updates.isNewer(version, BuildConfig.VERSION_NAME)) return
+                Notifications.notice(applicationContext, id, kind, version, data["title"].orEmpty(), data["body"].orEmpty())
             }
             "test" -> Notifications.test(applicationContext, data["title"].orEmpty(), data["body"].orEmpty())
         }

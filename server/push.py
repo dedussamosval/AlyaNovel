@@ -33,6 +33,7 @@ from server import net
 
 FCM_SERVICE_ACCOUNT = os.environ.get("FCM_SERVICE_ACCOUNT", "")
 TOPIC = os.environ.get("FCM_TOPIC", "new_chapters")  # то же имя, что Push.TOPIC в приложении
+NOTICE_TOPIC = os.environ.get("FCM_NOTICE_TOPIC", "app_notices") # Push.NOTICE_TOPIC в приложении 
 SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
 DEFAULT_TOKEN_URI = "https://oauth2.googleapis.com/token"
 
@@ -79,7 +80,7 @@ async def _access_token(client: httpx.AsyncClient, account: dict) -> str:
     return _token_cache["value"]
 
 
-async def send_to_topic(data: dict, *, client: httpx.AsyncClient | None = None) -> bool:
+async def send_to_topic(data: dict, *, topic: str | None = None, client: httpx.AsyncClient | None = None) -> bool:
     """Отправляет data-сообщение всем подписчикам темы. Не бросает исключений: сбой push не должен ломать загрузку главы."""
     if not enabled():
         return False
@@ -90,7 +91,7 @@ async def send_to_topic(data: dict, *, client: httpx.AsyncClient | None = None) 
             client, _ = net.make_client(httpx.Timeout(20.0))
         token = await _access_token(client, account)
         url = f"https://fcm.googleapis.com/v1/projects/{account['project_id']}/messages:send"
-        body = {"message": {"topic": TOPIC, "data": {k: str(v) for k, v in data.items()},
+        body = {"message": {"topic": topic, "data": {k: str(v) for k, v in data.items()},
                             "android": {"priority": "HIGH"}}}
         r = await client.post(url, json=body, headers={"Authorization": f"Bearer {token}"})
         if r.status_code >= 400:
@@ -111,7 +112,14 @@ async def notify_new_chapter(*, chapter_id: int, kind: str, volume: int, number:
     # type=chapter — тип СООБЩЕНИЯ для приложения; тип самой главы (пролог/эпилог/экстра) — chapter_type
     return await send_to_topic({"type": "chapter", "chapter_id": chapter_id, "kind": kind, "volume": volume,
                                 "number": number, "title": title, "created": created,
-                                "chapter_type": chapter_type}, client=client)
+                                "chapter_type": chapter_type}, topic=TOPIC, client=client)
+
+async def notify_notice(*, notice_id: int, kind: str, version: str, title: str, body: str,
+                        client: httpx.AsyncClient | None = None) -> bool:
+    # FCM data ≤ 4 КБ: в push идёт только начало текста, полный — через /api/notices
+    return await send_to_topic({"type": "notice", "id": notice_id, "kind": kind, "version": version,
+                                "title": title[:100], "body": body[:300]},
+                               topic=NOTICE_TOPIC, client=client)
 
 
 _background: set = set()

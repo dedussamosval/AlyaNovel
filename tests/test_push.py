@@ -148,7 +148,8 @@ def test_send_disabled_makes_no_requests(monkeypatch):
 
 def test_send_success_request_shape(account_file):
     log = []
-    ok = run(push.send_to_topic({"chapter_id": 7, "flag": True, "title": "Гл"}, client=make_client(log)))
+    ok = run(push.send_to_topic({"chapter_id": 7, "flag": True, "title": "Гл"},
+                                topic=push.TOPIC, client=make_client(log)))
     assert ok is True
     fcm = log[-1]
     assert str(fcm.url) == "https://fcm.googleapis.com/v1/projects/proj-1/messages:send"
@@ -218,13 +219,15 @@ def test_send_closes_own_client_on_failure(account_file, monkeypatch):
 def test_notify_new_chapter_payload(monkeypatch):
     sent = {}
 
-    async def fake_send(data, *, client=None):
+    async def fake_send(data, *, topic=None, client=None):
         sent.update(data)
+        sent["_topic"] = topic
         return True
     monkeypatch.setattr(push, "send_to_topic", fake_send)
     ok = run(push.notify_new_chapter(chapter_id=5, kind="ranobe", volume=1, number=0, title="Пролог",
                                      created=123, chapter_type="prologue"))
     assert ok is True
+    assert sent.pop("_topic") == push.TOPIC
     assert sent == {"type": "chapter", "chapter_id": 5, "kind": "ranobe", "volume": 1, "number": 0,
                     "title": "Пролог", "created": 123, "chapter_type": "prologue"}
 
@@ -232,12 +235,67 @@ def test_notify_new_chapter_payload(monkeypatch):
 def test_notify_new_chapter_default_type(monkeypatch):
     sent = {}
 
-    async def fake_send(data, *, client=None):
+    async def fake_send(data, *, topic=None, client=None):
         sent.update(data)
+        sent["_topic"] = topic
         return True
     monkeypatch.setattr(push, "send_to_topic", fake_send)
     run(push.notify_new_chapter(chapter_id=1, kind="manga", volume=1, number=1, title="t", created=1))
+    assert sent.pop("_topic") == push.TOPIC
     assert sent["chapter_type"] == "chapter" and sent["type"] == "chapter"
+
+
+def test_notify_notice_payload_and_topic(monkeypatch):
+    sent = {}
+
+    async def fake_send(data, *, topic=None, client=None):
+        sent.update(data)
+        sent["_topic"] = topic
+        sent["_client"] = client
+        return True
+
+    monkeypatch.setattr(push, "send_to_topic", fake_send)
+    client = object()
+    ok = run(push.notify_notice(
+        notice_id=12,
+        kind="maintenance",
+        version="1.2.3",
+        title="Обновление",
+        body="Текст объявления",
+        client=client,
+    ))
+
+    assert ok is True
+    assert sent == {
+        "type": "notice",
+        "id": 12,
+        "kind": "maintenance",
+        "version": "1.2.3",
+        "title": "Обновление",
+        "body": "Текст объявления",
+        "_topic": push.NOTICE_TOPIC,
+        "_client": client,
+    }
+
+
+def test_notify_notice_truncates_title_and_body(monkeypatch):
+    sent = {}
+
+    async def fake_send(data, *, topic=None, client=None):
+        sent.update(data)
+        return True
+
+    monkeypatch.setattr(push, "send_to_topic", fake_send)
+    run(push.notify_notice(
+        notice_id=1,
+        kind="news",
+        version="1",
+        title="T" * 150,
+        body="B" * 400,
+    ))
+
+    assert len(sent["title"]) == 100
+    assert len(sent["body"]) == 300
 
 
 def test_fire_and_forget_runs_task_and_releases_reference():

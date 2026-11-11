@@ -16,6 +16,8 @@ const val TYPE_CHAPTER = "chapter"
 const val TYPE_PROLOGUE = "prologue"   // R01-P, номера нет
 const val TYPE_EPILOGUE = "epilogue"   // R01-E, номера нет
 const val TYPE_EXTRA = "extra"         // R01-A01… дополнительные главы вне рамок сюжета
+const val NOTICE_CHANGELOG = "changelog"
+const val NOTICE_IMPORTANT = "important"
 
 /** Порядок внутри тома: пролог → главы → эпилог → экстра (так же сортирует сервер). */
 fun typeRank(type: String): Int = when (type) {
@@ -73,6 +75,9 @@ data class LatestChapter(
     val type: String = TYPE_CHAPTER,
 )
 
+data class Notice(val id: Int, val kind: String, val version: String, val title: String, val body: String, val created: Long)
+data class NoticeBatch(val top: Int, val url: String, val items: List<Notice>)
+
 fun parseVolumes(kind: String, json: String): List<Volume> =
     MiniJson.parse(json).arr().map { v ->
         val o = v.obj()
@@ -112,4 +117,16 @@ fun parseLatest(json: String): List<LatestChapter> = MiniJson.parse(json).arr().
     val o = it.obj()
     LatestChapter(o.int("id"), o.string("kind"), o.int("volume"), o.int("number"), o.string("title"), o.long("created"),
         o.string("type", TYPE_CHAPTER))
+}
+
+fun parseNotices(json: String): NoticeBatch {
+    val o = MiniJson.parse(json).obj()
+    return NoticeBatch(
+        top = o.int("top"),
+        url = o.string("url"),
+        items = o.list("items").map {
+            val n = it.obj()
+            Notice(n.int("id"), n.string("kind"), n.string("version"), n.string("title"), n.string("body"), n.long("created"))
+        },
+    )
 }

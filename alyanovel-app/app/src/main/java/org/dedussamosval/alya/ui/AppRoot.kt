@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -30,6 +31,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -41,6 +43,8 @@ import androidx.navigation.navArgument
 import org.dedussamosval.alya.ui.chat.ChatScreen
 import org.dedussamosval.alya.ui.chat.ChatViewModel
 import org.dedussamosval.alya.ui.home.HomeScreen
+import org.dedussamosval.alya.App
+import org.dedussamosval.alya.ui.notices.NoticesScreen
 import org.dedussamosval.alya.ui.reader.ReaderScreen
 import org.dedussamosval.alya.ui.settings.SettingsScreen
 
@@ -66,6 +70,7 @@ fun AppRoot() {
             )
         }
     }
+    NoticePrompt()
 }
 
 private data class Tab(val label: String, val icon: ImageVector)
@@ -73,6 +78,7 @@ private data class Tab(val label: String, val icon: ImageVector)
 private val tabs = listOf(
     Tab("Главная", Icons.Rounded.Home),
     Tab("Чат", Icons.Rounded.Forum),
+    Tab("Уведомления", Icons.Rounded.Notifications),
     Tab("Настройки", Icons.Rounded.Settings),
 )
 
@@ -85,6 +91,8 @@ private fun MainTabs(onOpenChapter: (Int) -> Unit) {
     // Чат живёт, пока приложение на экране; о новых сообщениях на других вкладках говорит значок
     val chatVm = appViewModel { ChatViewModel(it) }
     val chat by chatVm.state.collectAsState()
+    val noticeStore = (LocalContext.current.applicationContext as App).container.notices
+    val notices by noticeStore.state.collectAsState()
     LifecycleEventEffect(Lifecycle.Event.ON_START) { chatVm.setForeground(true) }
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { chatVm.setForeground(false) }
     LaunchedEffect(tab) { chatVm.setChatTabVisible(tab == 1) }
@@ -103,8 +111,9 @@ private fun MainTabs(onOpenChapter: (Int) -> Unit) {
                             selected = tab == index,
                             onClick = { tab = index },
                             icon = {
-                                if (index == 1 && chat.unread > 0) {
-                                    BadgedBox(badge = { Badge { Text(chat.unread.coerceAtMost(99).toString()) } }) {
+                                val badge = when (index) { 1 -> chat.unread; 2 -> notices.unread.size; else -> 0 }
+                                if (badge > 0) {
+                                    BadgedBox(badge = { Badge { Text(badge.coerceAtMost(99).toString()) } }) {
                                         Icon(item.icon, contentDescription = item.label)
                                     }
                                 } else {
@@ -122,6 +131,7 @@ private fun MainTabs(onOpenChapter: (Int) -> Unit) {
             when (tab) {
                 0 -> HomeScreen(listState = homeListState, onOpenChapter = onOpenChapter, snackbar = snackbar)
                 1 -> ChatScreen(vm = chatVm, snackbar = snackbar)
+                2 -> NoticesScreen()
                 else -> SettingsScreen(snackbar = snackbar)
             }
         }

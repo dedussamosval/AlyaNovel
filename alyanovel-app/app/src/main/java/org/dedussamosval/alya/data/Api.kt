@@ -107,6 +107,9 @@ class Api(private val http: OkHttpClient, baseUrl: String) {
         return http.newWebSocket(req, listener)
     }
 
+    fun notices(after: Int, limit: Int = 5): NoticeBatch =
+        parseNotices(get("/api/notices?after=$after&limit=$limit"))
+
     private fun parseObject(json: String): Map<String, Any?> = try {
         MiniJson.parse(json).obj()
     } catch (e: JsonException) {

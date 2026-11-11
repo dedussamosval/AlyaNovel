@@ -1,7 +1,10 @@
 import asyncio
 import os
+import re
 import secrets
 import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote
@@ -37,6 +40,9 @@ APK_DIR = Path(os.environ["APK_PATH"]).expanduser() if os.environ.get("APK_PATH"
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")  # https://домен — для ссылки на APK в проверке обновлений
 MTX_PART_BYTES = int(os.environ.get("MTX_PART_KB", "32")) * 1024  # вес одной части текста в .mtx
 AUTH_TTL = 600
+PUBLISH_TZ = ZoneInfo(os.environ.get("PUBLISH_TZ", "Europe/Moscow"))
+
+NOTICE_VERSION_RE = re.compile(r"^\d+(\.\d+){0,3}(-[A-Za-z0-9.]+)?$")   # 0.2.14 / 0.2.14-beta
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -104,13 +110,45 @@ def read_app_version() -> str | None:
 
     return version
 
+def parse_publish_at(value: str) -> int | None:
+    """'2026-11-10T18:00' из datetime-local → unix. Пусто / в прошлом / мусор → None (публикуем сразу)."""
+    if not value:
+        return None
+    try:
+        ts = int(datetime.fromisoformat(value).replace(tzinfo=PUBLISH_TZ).timestamp())
+    except ValueError:
+        return None
+    return ts if ts > db.now() else None
+
+async def publish_scheduler():
+    """Раз в 30 с: наступило время отложенной главы → один раз шлём пуш."""
+    while True:
+        try:
+            with db.conn() as c:
+                due = c.execute(
+                    "SELECT c.id, c.type, c.number, c.title, c.created, v.kind, v.number AS volume "
+                    "FROM chapters c JOIN volumes v ON v.id=c.volume_id "
+                    "WHERE c.notified=0 AND c.publish_at<=?", (db.now(),)).fetchall()
+            for r in due:
+                with db.conn() as c:   # «захват»: даже при двух процессах пуш уйдёт один раз
+                    claimed = c.execute("UPDATE chapters SET notified=1 WHERE id=? AND notified=0",
+                                        (r["id"],)).rowcount
+                if claimed and push.enabled():
+                    await push.notify_new_chapter(chapter_id=r["id"], kind=r["kind"], volume=r["volume"],
+                                                  number=r["number"], title=r["title"], created=r["created"],
+                                                  chapter_type=r["type"])
+        except Exception as e:
+            print("scheduler error:", e)
+        await asyncio.sleep(30)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init()
-    task = asyncio.create_task(run_bot())
+    tasks = [asyncio.create_task(run_bot()), asyncio.create_task(publish_scheduler())]
     yield
-    task.cancel()
+    for task in tasks:
+        task.cancel()
 
 
 app = FastAPI(title="AlyaNovel", lifespan=lifespan)
@@ -130,7 +168,7 @@ def list_volumes(kind: str):
         out = []
         for v in vols:
             chs = c.execute("SELECT id, type, number, title, fmt, size, created FROM chapters "
-                            f"WHERE volume_id=? ORDER BY {db.ORDER_SQL}", (v["id"],)).fetchall()
+            f"WHERE volume_id=? AND {db.VISIBLE_SQL} ORDER BY {db.ORDER_SQL}", (v["id"],)).fetchall()
             if chs:  # пустые тома клиенту не показываем
                 out.append({"id": v["id"], "number": v["number"], "title": v["title"],
                             "chapters": [dict(ch) for ch in chs]})
@@ -141,7 +179,8 @@ def list_volumes(kind: str):
 def chapter_file(chapter_id: int):
     with db.conn() as c:
         row = c.execute("SELECT c.fmt, c.path, c.type, c.number, v.kind, v.number AS volume "
-                        "FROM chapters c JOIN volumes v ON v.id=c.volume_id WHERE c.id=?", (chapter_id,)).fetchone()
+                "FROM chapters c JOIN volumes v ON v.id=c.volume_id "
+                f"WHERE c.id=? AND {db.VISIBLE_SQL}", (chapter_id,)).fetchone()
     if not row:
         raise HTTPException(404)
     try:
@@ -167,9 +206,21 @@ def latest(since: int = 0):
     """Для уведомлений о новых главах."""
     with db.conn() as c:
         rows = c.execute("SELECT c.id, c.type, c.number, c.title, c.created, v.kind, v.number AS volume "
-                         "FROM chapters c JOIN volumes v ON v.id=c.volume_id "
-                         "WHERE c.created>? ORDER BY c.created", (since,)).fetchall()
+                 "FROM chapters c JOIN volumes v ON v.id=c.volume_id "
+                 f"WHERE c.created>? AND {db.VISIBLE_SQL} ORDER BY c.created", (since,)).fetchall()
     return [dict(r) for r in rows]
+
+@app.get("/api/notices")
+def api_notices(after: int = 0, limit: int = 5):
+    limit = max(1, min(limit, 50))
+    with db.conn() as c:
+        rows = c.execute("SELECT id, kind, version, title, body, created FROM notices "
+                         "WHERE id>? ORDER BY id DESC LIMIT ?", (after, limit)).fetchall()
+        top = c.execute("SELECT COALESCE(MAX(id), 0) FROM notices").fetchone()[0]
+    return {"top": top,
+            "url": f"{PUBLIC_URL}/download" if apk_file() and PUBLIC_URL else "",
+            "items": [dict(r) for r in reversed(rows)]}
+
 
 
 # ───────────── Вход через Telegram ─────────────
@@ -299,10 +350,20 @@ def admin_home(request: Request, msg: str = ""):
         vols = [dict(v) for v in c.execute("SELECT * FROM volumes ORDER BY kind, number")]
         for v in vols:
             v["chapters"] = [dict(r) for r in c.execute(
-                f"SELECT id, type, number, title, fmt, size FROM chapters WHERE volume_id=? ORDER BY {db.ORDER_SQL}", (v["id"],))]
+                f"SELECT id, type, number, title, fmt, size, publish_at FROM chapters WHERE volume_id=? ORDER BY {db.ORDER_SQL}", (v["id"],))]
             for r in v["chapters"]:
                 r["code"] = formats.chapter_code(v["kind"], v["number"], r["type"], r["number"])
-    return templates.TemplateResponse(request, "admin.html", {"vols": vols, "msg": msg})
+                r["scheduled"] = bool(r["publish_at"] and r["publish_at"] > db.now())
+                r["when"] = (datetime.fromtimestamp(r["publish_at"], PUBLISH_TZ).strftime("%d.%m %H:%M")
+                    if r["scheduled"] else "")
+
+        notices = [dict(r) for r in c.execute(
+        "SELECT id, kind, version, title, created, push_ok FROM notices ORDER BY id DESC LIMIT 20")]
+        for n in notices:
+            n["when"] = datetime.fromtimestamp(n["created"], PUBLISH_TZ).strftime("%d.%m.%Y %H:%M")
+    return templates.TemplateResponse(request, "admin.html", {"vols": vols, "msg": msg, "publish_tz": PUBLISH_TZ.key, 
+                                                              "server_now": datetime.now(PUBLISH_TZ).strftime("%Y-%m-%dT%H:%M"), 
+                                                              "notices": notices, "app_version": read_app_version() or APP_VERSION})
 
 @app.get("/admin/settings", response_class=HTMLResponse,
          dependencies=[Depends(need_admin)])
@@ -398,7 +459,8 @@ def volume_delete(vid: int):
 @app.post("/admin/chapters", dependencies=[Depends(need_admin)])
 async def chapter_create(volume_id: int = Form(), number: str = Form(""), chapter_type: str = Form("chapter"),
                          title: str = Form(""), text: str = Form(""), direction: str = Form("rtl"),
-                         images: list[UploadFile] = File(default=[])):
+                         publish_at: str = Form(""), images: list[UploadFile] = File(default=[])):
+    ts = parse_publish_at(publish_at)   
     with db.conn() as c:
         vol = c.execute("SELECT * FROM volumes WHERE id=?", (volume_id,)).fetchone()
     if not vol:
@@ -423,16 +485,21 @@ async def chapter_create(volume_id: int = Form(), number: str = Form(""), chapte
     with db.conn() as c:
         old = c.execute("SELECT path FROM chapters WHERE volume_id=? AND type=? AND number=?",
                         (volume_id, chapter_type, number)).fetchone()
-        # created при замене не меняем: правка опечатки в главе не должна считаться «новой главой» (для уведомлений)
-        c.execute("INSERT INTO chapters(volume_id, type, number, title, fmt, path, size, created) VALUES(?,?,?,?,?,?,?,?) "
-                  "ON CONFLICT(volume_id, type, number) DO UPDATE SET title=excluded.title, fmt=excluded.fmt, "
-                  "path=excluded.path, size=excluded.size",
-                  (volume_id, chapter_type, number, title, fmt, new_path, len(blob), db.now()))
+        # created при замене не меняем (правка опечатки это не «новая глава»), кроме переноса ещё не вышедшей главы (для уведомлений)
+        c.execute(
+            "INSERT INTO chapters(volume_id, type, number, title, fmt, path, size, created, publish_at, notified) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(volume_id, type, number) DO UPDATE SET title=excluded.title, fmt=excluded.fmt, "
+            "path=excluded.path, size=excluded.size, "
+            "created=CASE WHEN excluded.publish_at IS NOT NULL AND notified=0 THEN excluded.publish_at ELSE created END, "
+            "publish_at=COALESCE(excluded.publish_at, publish_at)",
+            (volume_id, chapter_type, number, title, fmt, new_path, len(blob),
+             ts or db.now(), ts, 0 if (ts and not old) else 1))
         saved = c.execute("SELECT id, created FROM chapters WHERE volume_id=? AND type=? AND number=?",
                           (volume_id, chapter_type, number)).fetchone()
     if old:  # главу заменили — старый файл больше не нужен
         db.delete_chapter_files([old["path"]])
-    elif push.enabled():  # новая глава — мгновенное уведомление всем подписанным устройствам (в фоне)
+    elif push.enabled() and not ts:  # новая глава и без отложенной публикации — мгновенное уведомление всем подписанным устройствам (в фоне)
         push.fire_and_forget(push.notify_new_chapter(
             chapter_id=saved["id"], kind=vol["kind"], volume=vol["number"], number=number,
             title=title, created=saved["created"], chapter_type=chapter_type))
@@ -447,6 +514,51 @@ def chapter_delete(cid: int):
     if row:
         db.delete_chapter_files([row["path"]])
     return RedirectResponse("/admin?msg=Глава+удалена", 303)
+
+@app.post("/admin/chapters/{cid}/publish-now", dependencies=[Depends(need_admin)])
+def chapter_publish_now(cid: int):
+    t = db.now()
+    with db.conn() as c:
+        c.execute("UPDATE chapters SET publish_at=?, created=? WHERE id=? AND publish_at>?", (t, t, cid, t))
+    return RedirectResponse("/admin?msg=Опубликовано", 303)
+
+@app.post("/admin/notices", dependencies=[Depends(need_admin)])
+async def notice_send(kind: str = Form(), version: str = Form(""), title: str = Form(""), body: str = Form("")):
+    kind, version, title, body = kind.strip(), version.strip(), title.strip()[:100], body.strip()[:4000]
+
+    def back(msg: str):
+        return RedirectResponse(f"/admin?msg={quote(msg)}", 303)
+
+    if kind == "changelog":
+        if not NOTICE_VERSION_RE.match(version):
+            return back("Укажите версию в формате 0.2.14 или 0.2.14-beta")
+        if not body:
+            return back("Добавьте описание обновления")
+        title = "Доступна новая версия"
+    elif kind == "important":
+        if not title:
+            return back("Укажите заголовок")
+        version = ""
+    else:
+        raise HTTPException(400)
+
+    with db.conn() as c:
+        nid = c.execute("INSERT INTO notices(kind, version, title, body, created) VALUES(?,?,?,?,?)",
+                        (kind, version, title, body, db.now())).lastrowid
+    if not push.enabled():
+        return back("Сохранено. Push отключён (нет FCM_SERVICE_ACCOUNT) — увидят при запуске приложения")
+    if await push.notify_notice(notice_id=nid, kind=kind, version=version, title=title, body=body):
+        with db.conn() as c:
+            c.execute("UPDATE notices SET push_ok=1 WHERE id=?", (nid,))
+        return back("Уведомление отправлено")
+    return back("Сохранено, но push не ушёл (см. лог сервера). Увидят при запуске приложения")
+
+
+@app.post("/admin/notices/{nid}/delete", dependencies=[Depends(need_admin)])
+def notice_delete(nid: int):
+    with db.conn() as c:
+        c.execute("DELETE FROM notices WHERE id=?", (nid,))
+    return RedirectResponse("/admin?msg=Объявление+удалено", 303)
 
 
 # ───────────── Публичные страницы ─────────────

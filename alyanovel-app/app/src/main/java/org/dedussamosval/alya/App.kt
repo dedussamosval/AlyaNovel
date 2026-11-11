@@ -9,13 +9,16 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import org.dedussamosval.alya.data.Api
+import org.dedussamosval.alya.data.BookmarkStore
 import org.dedussamosval.alya.data.CatalogRepository
 import org.dedussamosval.alya.data.ChapterRepository
 import org.dedussamosval.alya.data.FileStore
 import org.dedussamosval.alya.data.NewChaptersWorker
 import org.dedussamosval.alya.data.Notifications
+import org.dedussamosval.alya.data.NoticeStore
 import org.dedussamosval.alya.data.Push
 import org.dedussamosval.alya.data.SettingsStore
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 /** Простой контейнер зависимостей: один экземпляр на процесс, ViewModel'и берут всё отсюда. */
@@ -33,6 +36,8 @@ class AppContainer(app: App) {
     val settings = SettingsStore(app)
     val catalog = CatalogRepository(api, files)
     val chapters = ChapterRepository(app, api, files, settings)
+    val bookmarks = BookmarkStore(File(app.filesDir, "bookmarks.json"))
+    val notices = NoticeStore(File(app.filesDir, "notices.json"))
 }
 
 class App : Application() {

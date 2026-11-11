@@ -28,14 +28,23 @@ import java.util.concurrent.TimeUnit
 
 private const val CHANNEL_CHAPTERS = "chapters"
 private const val WORK_NAME = "new_chapters"
+private const val CHANNEL_UPDATES = "updates"
+private const val CHANNEL_IMPORTANT = "important"
 
 object Notifications {
 
     fun createChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val channel = NotificationChannel(CHANNEL_CHAPTERS, "Новые главы", NotificationManager.IMPORTANCE_DEFAULT)
-        channel.description = "Сообщения о выходе новых глав"
-        context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        val nm = context.getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_CHAPTERS, "Новые главы", NotificationManager.IMPORTANCE_DEFAULT)
+                .apply { description = "Сообщения о выходе новых глав" })
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_UPDATES, "Обновления приложения", NotificationManager.IMPORTANCE_DEFAULT)
+                .apply { description = "Новая версия AlyaNovel" })
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_IMPORTANT, "Важные уведомления", NotificationManager.IMPORTANCE_HIGH)
+                .apply { description = "Важные сообщения от автора" })
     }
 
     fun canPost(context: Context): Boolean {
@@ -50,18 +59,19 @@ object Notifications {
         return "$kind · том ${item.volume}, ${chapterLabel(item.type, item.number).lowercase()}"
     }
 
-    @SuppressLint("MissingPermission") // разрешение проверяется в canPost()
-    private fun post(context: Context, id: Int, title: String, text: String) {
+    @SuppressLint("MissingPermission")
+    private fun post(context: Context, id: Int, title: String, text: String, channel: String = CHANNEL_CHAPTERS) {
         if (!canPost(context)) return
         val open = PendingIntent.getActivity(
             context, 0,
             Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val n = NotificationCompat.Builder(context, CHANNEL_CHAPTERS)
+        val n = NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_alya_chibi)
             .setContentTitle(title)
             .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(open)
             .setAutoCancel(true)
             .build()
@@ -78,6 +88,14 @@ object Notifications {
     fun newChapter(context: Context, item: LatestChapter) {
         val text = describe(item) + if (item.title.isNotBlank()) " · ${item.title}" else ""
         post(context, 2000 + item.id, "Новая глава", text)
+    }
+
+    fun notice(context: Context, id: Int, kind: String, version: String, title: String, body: String) {
+        if (kind == NOTICE_CHANGELOG) {
+            post(context, 4000 + id, "Доступна новая версия", "Версия $version", CHANNEL_UPDATES)
+        } else {
+            post(context, 4000 + id, title.ifBlank { "AlyaNovel" }, body, CHANNEL_IMPORTANT)
+        }
     }
 
     /** Проверочное уведомление: python -m server.push */

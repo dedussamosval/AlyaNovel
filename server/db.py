@@ -17,26 +17,44 @@ SESSION_TTL = int(float(os.environ.get("SESSION_TTL_DAYS", "90")) * 86400)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS volumes(
-  id INTEGER PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('manga','ranobe')),
-  number INTEGER NOT NULL, title TEXT NOT NULL DEFAULT '', UNIQUE(kind, number));
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL CHECK(kind IN ('manga','ranobe')),
+  number INTEGER NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  UNIQUE(kind, number)
+);
+
 CREATE TABLE IF NOT EXISTS chapters(
-  id INTEGER PRIMARY KEY, volume_id INTEGER NOT NULL REFERENCES volumes(id) ON DELETE CASCADE,
-  type TEXT NOT NULL DEFAULT 'chapter' CHECK(type IN ('chapter','prologue','epilogue','extra')),
-  number INTEGER NOT NULL DEFAULT 0, title TEXT NOT NULL DEFAULT '', fmt TEXT NOT NULL,
-  path TEXT NOT NULL, size INTEGER NOT NULL, created INTEGER NOT NULL,
-  UNIQUE(volume_id, type, number));
-CREATE TABLE IF NOT EXISTS admins(id INTEGER PRIMARY KEY, login TEXT UNIQUE NOT NULL, pwhash TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS users(tg_id INTEGER PRIMARY KEY, username TEXT, name TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, tg_id INTEGER NOT NULL, created INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS auth_requests(token TEXT PRIMARY KEY, tg_id INTEGER, created INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS messages(
-  id INTEGER PRIMARY KEY, tg_id INTEGER NOT NULL, name TEXT NOT NULL,
-  text TEXT NOT NULL, created INTEGER NOT NULL);
+  id INTEGER PRIMARY KEY,
+  volume_id INTEGER NOT NULL REFERENCES volumes(id) ON DELETE CASCADE,
+  type TEXT NOT NULL DEFAULT 'chapter'
+    CHECK(type IN ('chapter','prologue','epilogue','extra')),
+  number INTEGER NOT NULL DEFAULT 0,
+  title TEXT NOT NULL DEFAULT '',
+  fmt TEXT NOT NULL,
+  path TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  created INTEGER NOT NULL,
+  publish_at INTEGER,
+  notified INTEGER NOT NULL DEFAULT 1,
+  UNIQUE(volume_id, type, number)
+);
+
+CREATE TABLE IF NOT EXISTS admins(
+  id INTEGER PRIMARY KEY,
+  login TEXT UNIQUE NOT NULL,
+  pwhash TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS notices(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   kind TEXT NOT NULL CHECK(kind IN ('changelog','important')),
-  version TEXT NOT NULL DEFAULT '', title TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '',
-  created INTEGER NOT NULL, push_ok INTEGER NOT NULL DEFAULT 0);
+  version TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL DEFAULT '',
+  created INTEGER NOT NULL,
+  push_ok INTEGER NOT NULL DEFAULT 0
+);
 """
 
 
@@ -56,6 +74,7 @@ def init():
     os.makedirs(STORAGE_DIR, exist_ok=True)
     with conn() as c:
         c.execute("PRAGMA journal_mode=WAL")
+        c.execute("PRAGMA user_version=3")
         c.executescript(SCHEMA)
         _migrate_blobs_to_files(c)
         _migrate_chapter_types(c)

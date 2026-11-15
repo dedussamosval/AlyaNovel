@@ -11,8 +11,8 @@ from urllib.parse import quote
 from dotenv import load_dotenv
 load_dotenv()
 
-import httpx
 from sqlite3 import IntegrityError
+from pydantic import BaseModel, Field 
 from fastapi import (Depends, FastAPI, File, Form, Header, HTTPException, Request,
                      Response, UploadFile, WebSocket, WebSocketDisconnect)
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -26,7 +26,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from common import formats  # noqa: E402
 from server import db  # noqa: E402
 from server import images as imgmod  # noqa: E402
-from server import net  # noqa: E402
 from server import push  # noqa: E402
 from server import security # noqa: E402
 
@@ -46,59 +45,6 @@ NOTICE_VERSION_RE = re.compile(r"^\d+(\.\d+){0,3}(-[A-Za-z0-9.]+)?$")   # 0.2.14
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
-
-# ───────────── Telegram-бот (long polling, без доп. зависимостей) ─────────────
-async def tg_call(client: httpx.AsyncClient, method: str, **params):
-    r = await client.post(f"https://api.telegram.org/bot{BOT_TOKEN}/{method}", json=params, timeout=65)
-    return r.json()
-
-
-async def run_bot():
-    if not BOT_TOKEN:
-        print("BOT_TOKEN не задан — вход через Telegram отключён")
-        return
-    offset = 0
-    try:
-        client, _ = net.make_client(httpx.Timeout(65.0))
-    except net.ProxyError as e:
-        print("Бот не запущен:", e)
-        return
-    async with client:
-        while True:
-            try:
-                res = await tg_call(client, "getUpdates", offset=offset, timeout=50)
-                for upd in res.get("result", []):
-                    offset = upd["update_id"] + 1
-                    msg = upd.get("message") or {}
-                    text = msg.get("text", "")
-                    if not text.startswith("/start "):
-                        if text.startswith("/start"):
-                            await tg_call(client, "sendMessage", chat_id=msg["chat"]["id"],
-                                          text="Откройте приложение и нажмите «Войти через Telegram».")
-                        continue
-                    token = text.split(maxsplit=1)[1].strip()
-                    u = msg["from"]
-                    ok = confirm_auth(token, u["id"], u.get("username"),
-                                      " ".join(filter(None, [u.get("first_name"), u.get("last_name")])))
-                    await tg_call(client, "sendMessage", chat_id=msg["chat"]["id"],
-                                  text="✅ Готово, вернитесь в приложение." if ok
-                                  else "Ссылка устарела. Повторите вход в приложении.")
-            except Exception as e:  # сеть моргнула — не падаем
-                print("bot error:", e)
-                await asyncio.sleep(5)
-
-
-def confirm_auth(token: str, tg_id: int, username: str | None, name: str) -> bool:
-    with db.conn() as c:
-        row = c.execute("SELECT * FROM auth_requests WHERE token=? AND tg_id IS NULL AND created>?",
-                        (token, db.now() - AUTH_TTL)).fetchone()
-        if not row:
-            return False
-        c.execute("UPDATE auth_requests SET tg_id=? WHERE token=?", (tg_id, token))
-        c.execute("INSERT INTO users(tg_id, username, name) VALUES(?,?,?) "
-                  "ON CONFLICT(tg_id) DO UPDATE SET username=excluded.username, name=excluded.name",
-                  (tg_id, username, name or username or str(tg_id)))
-    return True
 
 def read_app_version() -> str | None:
     if APK_DIR is None:
@@ -145,7 +91,7 @@ async def publish_scheduler():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init()
-    tasks = [asyncio.create_task(run_bot()), asyncio.create_task(publish_scheduler())]
+    tasks = [asyncio.create_task(publish_scheduler())]
     yield
     for task in tasks:
         task.cancel()
@@ -220,99 +166,6 @@ def api_notices(after: int = 0, limit: int = 5):
     return {"top": top,
             "url": f"{PUBLIC_URL}/download" if apk_file() and PUBLIC_URL else "",
             "items": [dict(r) for r in reversed(rows)]}
-
-
-
-# ───────────── Вход через Telegram ─────────────
-@app.post("/api/auth/start")
-def auth_start():
-    token = secrets.token_urlsafe(24)
-    with db.conn() as c:
-        c.execute("DELETE FROM auth_requests WHERE created<?", (db.now() - AUTH_TTL,))
-        c.execute("INSERT INTO auth_requests(token, created) VALUES(?,?)", (token, db.now()))
-    return {"token": token, "url": f"https://t.me/{BOT_USERNAME}?start={token}"}
-
-
-@app.get("/api/auth/poll/{token}")
-def auth_poll(token: str):
-    with db.conn() as c:
-        row = c.execute("SELECT tg_id FROM auth_requests WHERE token=? AND created>?",
-                        (token, db.now() - AUTH_TTL)).fetchone()
-        if not row:
-            raise HTTPException(410, "expired")
-        if row["tg_id"] is None:
-            return {"status": "pending"}
-        c.execute("DELETE FROM auth_requests WHERE token=?", (token,))
-        session = db.create_session(c, row["tg_id"])
-        user = c.execute("SELECT name FROM users WHERE tg_id=?", (row["tg_id"],)).fetchone()
-    return {"status": "ok", "session": session, "name": user["name"]}
-
-
-def current_user(authorization: str = Header(default="")):
-    token = authorization.removeprefix("Bearer ").strip()
-    with db.conn() as c:
-        user = db.session_user(c, token)
-    if not user:
-        raise HTTPException(401)
-    return user
-
-
-# ───────────── Чат ─────────────
-class Hub:
-    def __init__(self):
-        self.clients: set[WebSocket] = set()
-
-    async def broadcast(self, payload: dict):
-        for ws in list(self.clients):
-            try:
-                await ws.send_json(payload)
-            except Exception:
-                self.clients.discard(ws)
-
-
-hub = Hub()
-
-
-@app.get("/api/chat/messages")
-def chat_history(limit: int = 50, user=Depends(current_user)):
-    with db.conn() as c:
-        rows = c.execute("SELECT id, name, text, created FROM messages ORDER BY id DESC LIMIT ?",
-                         (min(limit, 200),)).fetchall()
-    return [dict(r) for r in reversed(rows)]
-
-
-@app.websocket("/ws/chat")
-async def chat_ws(ws: WebSocket, token: str = ""):
-    user = None
-    with db.conn() as c:
-        user = db.session_user(c, token)
-    if not user:
-        await ws.close(code=4401)
-        return
-
-    await ws.accept()
-    hub.clients.add(ws)
-    try:
-        while True:
-            text = (await ws.receive_text()).strip()[:2000]
-            if not text:
-                continue
-
-            with db.conn() as c:
-                cur = c.execute(
-                    "INSERT INTO messages(tg_id, name, text, created) VALUES(?,?,?,?)",
-                    (user["tg_id"], user["name"], text, db.now()),
-                )
-            await hub.broadcast({
-                "id": cur.lastrowid,
-                "name": user["name"],
-                "text": text,
-                "created": db.now(),
-            })
-    except WebSocketDisconnect:
-        pass
-    finally:
-        hub.clients.discard(ws)
 
 
 # ───────────── Сайт администратора ─────────────
@@ -571,7 +424,7 @@ def apk_file() -> tuple[str, Path] | None:
     if APK_DIR is None or version is None:
         return None
 
-    apk = APK_DIR / f"alyanovel-v.{version}.apk"
+    apk = APK_DIR / f"alyanovel-v.{version}-release.apk"
     return (version, apk) if apk.is_file() else None
 
 

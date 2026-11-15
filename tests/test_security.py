@@ -178,7 +178,7 @@ def test_security_headers_do_not_override_app_headers(client):
     assert client.get("/custom").headers["x-frame-options"] == "SAMEORIGIN"
 
 
-@pytest.mark.parametrize("path", ["/admin/page", "/api/auth/poll/abc", "/api/chat/x"])
+@pytest.mark.parametrize("path", ["/admin/page"])
 def test_no_store_for_private_paths(client, path):
     assert client.get(path).headers["cache-control"] == "no-store"
 

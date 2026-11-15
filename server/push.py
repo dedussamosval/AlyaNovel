@@ -137,5 +137,5 @@ if __name__ == "__main__":
     if not enabled():
         sys.exit("FCM_SERVICE_ACCOUNT не задан или файл не найден")
     text = " ".join(sys.argv[1:]) or "Если вы это видите — мгновенные уведомления работают"
-    ok = asyncio.run(send_to_topic({"type": "test", "title": "Тест AlyaNovel", "body": text}))
+    ok = asyncio.run(send_to_topic({"type": "test", "title": "Тест AlyaNovel", "body": text}, topic=TOPIC))
     print("отправлено" if ok else "не отправлено — см. сообщение выше")

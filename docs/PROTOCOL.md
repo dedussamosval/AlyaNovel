@@ -11,21 +11,11 @@
 | `GET /api/chapters/{id}/file` | Файл главы (`.mtx`/`.mpx`), бинарно | `application/octet-stream` |
 | `GET /api/latest?since=<unix-сек>` | Главы, созданные позже `since` (для уведомлений) | `[{"id","type","kind","volume","number","title","created"}]` |
 | `GET /api/app-version` | Последняя версия приложения | `{"latest":"0.1.0","url":"https://…"}` |
-| `POST /api/auth/start` | Начать вход через Telegram | `{"token","url"}` — открыть `url` (бот), опрашивать `poll` |
-| `GET /api/auth/poll/{token}` | Опрос входа | `{"status":"pending"}` / `{"status":"ok","session","name"}`; `410` — ссылка устарела (10 минут) |
-| `GET /api/chat/messages` | История чата (последние 50), нужен `Authorization: Bearer <session>` | `[{"id","name","text","created"}]`; `401` — сессия недействительна |
-| `WS /ws/chat?token=<session>` | Чат в реальном времени | клиент шлёт **простой текст** (до 2000 символов); сервер рассылает JSON `{"id","name","text","created"}`; недействительная сессия → закрытие рукопожатия (403) или код `4401` |
 
 Поля: `type` — тип главы (см. ниже; нет поля = `chapter`); `fmt` — `"mtx"` или `"mpx"`; `size` — размер файла в байтах (вместе с `id` определяет имя локального файла,
 замена главы на сервере = другой `size` = перекачивание); `created` — unix-секунды.
 
 Страницы сайта, на которые ссылается приложение: `/tos`, `/privacy` (настройки → «О приложении»).
-
-### Вход через Telegram
-1. `POST /api/auth/start` → `{token, url}`.
-2. Клиент открывает `url` (`https://t.me/<бот>?start=<token>`), пользователь нажимает Start.
-3. Клиент раз в ~2 с вызывает `GET /api/auth/poll/{token}` до `ok` (или `410`/таймаут ~10 мин).
-4. Сохраняет `session` и `name`; дальше `Authorization: Bearer <session>` для REST и `?token=` для WebSocket.
 
 ## Типы глав и коды файлов
 

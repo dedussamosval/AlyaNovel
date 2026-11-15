@@ -1,6 +1,6 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
+//    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
 
@@ -10,19 +10,26 @@ if (file("google-services.json").exists()) {
 
 fun quoted(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
-val serverUrl = (project.findProperty("serverUrl") as String?) ?: "https://manga.example.com"
+val serverUrl = (project.findProperty("serverUrl") as String?) ?: "https://alyanovel.ru"
 val debugServerUrl = (project.findProperty("debugServerUrl") as String?) ?: serverUrl
+
+val appVersionName = "0.2.15"
+
+base {
+    archivesName.set("alyanovel-v.$appVersionName")
+}
 
 android {
     namespace = "org.dedussamosval.alya"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "org.dedussamosval.alya"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 13
-        versionName = "0.2.14-beta"
+        //noinspection EditedTargetSdkVersion
+        targetSdk = 37
+        versionCode = 14
+        versionName = appVersionName
         buildConfigField("String", "SERVER_URL", quoted(serverUrl))
     }
 
@@ -48,20 +55,11 @@ android {
         }
     }
 
-    applicationVariants.all {
-        val v = this
-        v.outputs.map { it as com.android.build.gradle.internal.api.BaseVariantOutputImpl }.forEach { output ->
-            output.outputFileName = "alyanovel-v.${v.versionName}.apk"
-        }
-    }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+
     buildFeatures {
         compose = true
         buildConfig = true

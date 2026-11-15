@@ -214,6 +214,7 @@
   }
 
 let selectedImages = [];
+let imagesChanged = false;
 let draggedIndex = null;
 
 function clearPreviews() {
@@ -314,6 +315,7 @@ function moveImage(from, to) {
 
 imageInput.addEventListener("change", () => {
   // Начальная сортировка остаётся такой же, как была на сервере.
+  imagesChanged = true;
   selectedImages = [...imageInput.files].sort((a, b) =>
     a.name.localeCompare(b.name, undefined, {
       numeric: true,
@@ -540,6 +542,7 @@ imageInput.addEventListener("change", () => {
 
       if (xhr.status >= 200 && xhr.status < 400) {
         if (message.includes("Глава сохранена")) {
+          imagesChanged = false;
           if (currentDraftKey) {
             try {
               localStorage.removeItem(currentDraftKey);
@@ -577,12 +580,14 @@ imageInput.addEventListener("change", () => {
     }
   });
 
-  window.addEventListener("beforeunload", (event) => {
-    if (!submitting && textArea.value !== loadedText) {
-      event.preventDefault();
-      event.returnValue = "";
-    }
-  });
+window.addEventListener("beforeunload", (event) => {
+  const textChanged = textArea.value !== loadedText;
+
+  if (!submitting && (textChanged || imagesChanged)) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+});
 
   window.addEventListener("pageshow", () => {
     restoreSaveButton();

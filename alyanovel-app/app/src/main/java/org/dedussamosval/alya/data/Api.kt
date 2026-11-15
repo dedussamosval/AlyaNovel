@@ -1,10 +1,12 @@
 package org.dedussamosval.alya.data
 
 import okhttp3.OkHttpClient
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import org.json.JSONObject
 import org.dedussamosval.alya.formats.JsonException
 import org.dedussamosval.alya.formats.MiniJson
 import org.dedussamosval.alya.formats.obj
@@ -30,10 +32,14 @@ class Api(private val http: OkHttpClient, baseUrl: String) {
     private fun requestJson(request: Request): String {
         http.newCall(request).execute().use { r ->
             if (r.code == 401) throw UnauthorizedException()
-            if (!r.isSuccessful) throw ApiException("Сервер ответил ${r.code}", r.code)
+            if (!r.isSuccessful) throw ApiException(errorDetail(r) ?: "Сервер ответил ${r.code}", r.code)
             return r.body?.string() ?: throw ApiException("Пустой ответ сервера")
         }
     }
+
+    private fun errorDetail(r: okhttp3.Response): String? =
+        runCatching { MiniJson.parse(r.body?.string().orEmpty()).obj().string("detail") }
+            .getOrNull()?.takeIf { it.isNotBlank() }
 
     private fun get(path: String, session: String? = null): String {
         val b = Request.Builder().url(baseUrl + path)
@@ -82,30 +88,6 @@ class Api(private val http: OkHttpClient, baseUrl: String) {
         }
     }
 
-    // ───── вход через Telegram ─────
-    fun authStart(): AuthStart {
-        val req = Request.Builder().url("$baseUrl/api/auth/start").post("".toRequestBody()).build()
-        val o = parseObject(requestJson(req))
-        return AuthStart(o.string("token"), o.string("url"))
-    }
-
-    fun authPoll(token: String): AuthPoll {
-        val req = Request.Builder().url("$baseUrl/api/auth/poll/$token").build()
-        http.newCall(req).execute().use { r ->
-            if (r.code == 410) return AuthPoll.Expired
-            if (!r.isSuccessful) throw ApiException("Сервер ответил ${r.code}", r.code)
-            val o = parseObject(r.body?.string() ?: throw ApiException("Пустой ответ сервера"))
-            return if (o.string("status") == "ok") AuthPoll.Ok(o.string("session"), o.string("name")) else AuthPoll.Pending
-        }
-    }
-
-    // ───── чат ─────
-    fun chatHistory(session: String): List<ChatMessage> = parseChatHistory(get("/api/chat/messages", session))
-
-    fun openChat(session: String, listener: WebSocketListener): WebSocket {
-        val req = Request.Builder().url("$baseUrl/ws/chat?token=$session").build()
-        return http.newWebSocket(req, listener)
-    }
 
     fun notices(after: Int, limit: Int = 5): NoticeBatch =
         parseNotices(get("/api/notices?after=$after&limit=$limit"))

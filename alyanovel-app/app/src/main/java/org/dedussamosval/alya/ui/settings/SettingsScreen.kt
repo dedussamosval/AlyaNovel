@@ -116,7 +116,6 @@ fun SettingsScreen(snackbar: SnackbarHostState) {
                     p.notifyChapters, ::onNotifyChapters,
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                SwitchRow("Сообщения в чате", "Значок непрочитанных на вкладке «Чат»", p.notifyChat, vm::setNotifyChat)
             }
         }
 

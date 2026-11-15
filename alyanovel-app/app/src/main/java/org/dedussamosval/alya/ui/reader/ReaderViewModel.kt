@@ -199,6 +199,10 @@ class ReaderViewModel(private val c: AppContainer, private val chapterId: Int) :
         viewModelScope.launch { c.settings.set(Keys.FONT_FAMILY, v) }
     }
 
+    fun setMangaMode(v: String) {
+        viewModelScope.launch { c.settings.set(Keys.MANGA_MODE, v) }
+    }
+
     fun setLineSpacing(v: Int) {
         viewModelScope.launch { c.settings.set(Keys.LINE_SPACING, v) }
     }

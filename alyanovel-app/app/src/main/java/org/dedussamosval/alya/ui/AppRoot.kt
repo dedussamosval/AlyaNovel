@@ -22,7 +22,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -40,8 +39,6 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import org.dedussamosval.alya.ui.chat.ChatScreen
-import org.dedussamosval.alya.ui.chat.ChatViewModel
 import org.dedussamosval.alya.ui.home.HomeScreen
 import org.dedussamosval.alya.App
 import org.dedussamosval.alya.ui.notices.NoticesScreen
@@ -53,7 +50,10 @@ fun AppRoot() {
     val nav = rememberNavController()
     NavHost(navController = nav, startDestination = "tabs") {
         composable("tabs") {
-            MainTabs(onOpenChapter = { id -> nav.navigate("reader/$id") })
+            MainTabs(
+                onOpenChapter = { id -> nav.navigate("reader/$id") },
+                onOpenAccount = { nav.navigate("account") },
+            )
         }
         composable(
             route = "reader/{id}",
@@ -77,25 +77,23 @@ private data class Tab(val label: String, val icon: ImageVector)
 
 private val tabs = listOf(
     Tab("Главная", Icons.Rounded.Home),
-    Tab("Чат", Icons.Rounded.Forum),
     Tab("Уведомления", Icons.Rounded.Notifications),
     Tab("Настройки", Icons.Rounded.Settings),
 )
 
 @Composable
-private fun MainTabs(onOpenChapter: (Int) -> Unit) {
+private fun MainTabs(onOpenChapter: (Int) -> Unit, onOpenAccount: () -> Unit) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val snackbar = remember { SnackbarHostState() }
     val homeListState = rememberLazyListState() // чтобы позиция списка не терялась при смене вкладки
 
     // Чат живёт, пока приложение на экране; о новых сообщениях на других вкладках говорит значок
-    val chatVm = appViewModel { ChatViewModel(it) }
-    val chat by chatVm.state.collectAsState()
+//    val chatVm = appViewModel { ChatViewModel(it) }
+//    val chat by chatVm.state.collectAsState()
     val noticeStore = (LocalContext.current.applicationContext as App).container.notices
     val notices by noticeStore.state.collectAsState()
-    LifecycleEventEffect(Lifecycle.Event.ON_START) { chatVm.setForeground(true) }
-    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { chatVm.setForeground(false) }
-    LaunchedEffect(tab) { chatVm.setChatTabVisible(tab == 1) }
+//    LifecycleEventEffect(Lifecycle.Event.ON_START) { chatVm.setForeground(true) }
+//    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { chatVm.setForeground(false) }
 
     // Когда открыта клавиатура, нижнюю панель прячем — поле ввода чата остаётся над клавиатурой
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
@@ -111,7 +109,7 @@ private fun MainTabs(onOpenChapter: (Int) -> Unit) {
                             selected = tab == index,
                             onClick = { tab = index },
                             icon = {
-                                val badge = when (index) { 1 -> chat.unread; 2 -> notices.unread.size; else -> 0 }
+                                val badge = when (index) { 1 -> notices.unread.size; else -> 0 }
                                 if (badge > 0) {
                                     BadgedBox(badge = { Badge { Text(badge.coerceAtMost(99).toString()) } }) {
                                         Icon(item.icon, contentDescription = item.label)
@@ -130,8 +128,8 @@ private fun MainTabs(onOpenChapter: (Int) -> Unit) {
         Box(Modifier.padding(padding).consumeWindowInsets(padding)) {
             when (tab) {
                 0 -> HomeScreen(listState = homeListState, onOpenChapter = onOpenChapter, snackbar = snackbar)
-                1 -> ChatScreen(vm = chatVm, snackbar = snackbar)
-                2 -> NoticesScreen()
+//                1 -> ChatScreen(vm = chatVm, snackbar = snackbar, onOpenAccount = onOpenAccount)
+                1 -> NoticesScreen()
                 else -> SettingsScreen(snackbar = snackbar)
             }
         }

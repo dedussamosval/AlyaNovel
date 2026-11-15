@@ -22,10 +22,13 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.AutoStories
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.Bookmarks
 import androidx.compose.material.icons.rounded.BookmarkBorder
@@ -80,6 +83,8 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import org.dedussamosval.alya.App
 import org.dedussamosval.alya.data.Bookmark
+import org.dedussamosval.alya.data.MANGA_PAGER_H
+import org.dedussamosval.alya.data.MANGA_PAGER_V
 import org.dedussamosval.alya.data.Prefs
 import org.dedussamosval.alya.data.ReaderPosition
 import org.dedussamosval.alya.ui.appViewModel
@@ -97,7 +102,19 @@ fun ReaderScreen(chapterId: Int, onBack: () -> Unit, onOpenChapter: (Int) -> Uni
     val prefs by container.settings.flow.collectAsState(initial = Prefs())
 
     val listState = rememberLazyListState()
+    val ready = state as? ReaderState.Ready
+    val isManga = ready?.isManga == true
+    val pagerMode = isManga && (prefs.mangaMode == MANGA_PAGER_H || prefs.mangaMode == MANGA_PAGER_V)
+    val itemCount = ready?.items?.size ?: 0
+    val pagerState = rememberPagerState { itemCount + 1 }   // +1 — футер
+    var showMangaSettings by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+
+    fun currentIndex() = if (pagerMode) pagerState.currentPage else listState.firstVisibleItemIndex
+    suspend fun jumpTo(i: Int) {
+        if (pagerMode) pagerState.animateScrollToPage(i.coerceIn(0, itemCount))
+        else listState.animateScrollToItem(i.coerceAtMost(listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
+    }
 
     var savedPosition by remember(chapterId) {
         mutableStateOf<ReaderPosition?>(null)
@@ -139,7 +156,8 @@ fun ReaderScreen(chapterId: Int, onBack: () -> Unit, onOpenChapter: (Int) -> Uni
 
                     IconButton(
                         onClick = {
-                            scope.launch { listState.animateScrollToItem(0) }
+                            scope.launch { jumpTo(0) }
+//                            scope.launch { listState.animateScrollToItem(0) }
                         },
                     ) {
                         Icon(
@@ -151,6 +169,12 @@ fun ReaderScreen(chapterId: Int, onBack: () -> Unit, onOpenChapter: (Int) -> Uni
                     if (canStyleText) {
                         IconButton(onClick = { showTextSettings = true }) {
                             Icon(Icons.Rounded.TextFields, contentDescription = "Шрифт и размер текста")
+                        }
+                    }
+
+                    if (isManga) {
+                        IconButton(onClick = { showMangaSettings = true }) {
+                            Icon(Icons.Rounded.AutoStories, contentDescription = "Режим чтения")
                         }
                     }
                 },
@@ -192,7 +216,9 @@ fun ReaderScreen(chapterId: Int, onBack: () -> Unit, onOpenChapter: (Int) -> Uni
                     next = vm.neighbors.second?.id,
                     onOpenChapter = onOpenChapter,
                     marked = remember(bookmarks) { bookmarks.mapTo(HashSet()) { it.itemIndex } },
-                    onParagraphLongPress = { bookmarkTarget = it}
+                    onParagraphLongPress = { bookmarkTarget = it},
+                    pagerState = pagerState,
+                    mangaMode = prefs.mangaMode,
                 )
             }
         }
@@ -208,9 +234,13 @@ fun ReaderScreen(chapterId: Int, onBack: () -> Unit, onOpenChapter: (Int) -> Uni
         )
     }
 
+    if (showMangaSettings && isManga) {
+        MangaSettingsSheet(prefs.mangaMode, vm::setMangaMode) { showMangaSettings = false }
+    }
+
     bookmarkTarget?.let { index ->
         val existing = bookmarks.firstOrNull { it.itemIndex == index }
-        val text = ((vm.state.value as? ReaderState.Ready)?.items?.getOrNull(index) as? ReaderItem.Paragraph)?.text.orEmpty()
+        val text = ((vm.state.collectAsState().value as? ReaderState.Ready)?.items?.getOrNull(index) as? ReaderItem.Paragraph)?.text.orEmpty()
         AlertDialog(
             onDismissRequest = { bookmarkTarget = null },
             title = { Text(if (existing == null) "Добавить закладку?" else "Убрать закладку?") },
@@ -225,17 +255,14 @@ fun ReaderScreen(chapterId: Int, onBack: () -> Unit, onOpenChapter: (Int) -> Uni
     }
 
     if (showBookmarks) {
-        val here = listState.firstVisibleItemIndex
+        val here = currentIndex()
         BookmarksSheet(
             items = bookmarks,
             hasHere = bookmarks.any { it.itemIndex == here },
             onToggleHere = { vm.toggleBookmark(here) },
             onJump = { b ->
                 showBookmarks = false
-                scope.launch {
-                    vm.awaitItem(b.itemIndex)
-                    listState.animateScrollToItem(b.itemIndex.coerceAtMost(listState.layoutInfo.totalItemsCount - 1))
-                }
+                scope.launch { vm.awaitItem(b.itemIndex); jumpTo(b.itemIndex) }
             },
             onDelete = vm::removeBookmark,
             onDismiss = { showBookmarks = false },
@@ -289,11 +316,14 @@ private fun ReaderContent(
     onOpenChapter: (Int) -> Unit,
     marked: Set<Int>,
     onParagraphLongPress: (Int) -> Unit,
+    pagerState: PagerState,
+    mangaMode: String,
 ) {
     // Манга — лента страниц во всю ширину без полей; ранобэ — текст с полями и скруглёнными иллюстрациями
     val sidePadding = if (state.isManga) 0.dp else 20.dp
 //    val listState = rememberLazyListState()
     val pages = state.items.size
+    val pagerMode = state.isManga && (mangaMode == MANGA_PAGER_H || mangaMode == MANGA_PAGER_V)
 
     var restored by remember(chapterId) {
         mutableStateOf(false)
@@ -304,6 +334,7 @@ private fun ReaderContent(
 
     val haptic = LocalHapticFeedback.current
     val longPress by rememberUpdatedState(onParagraphLongPress)
+
 
     LaunchedEffect(positionLoaded, savedPosition, state.items.size, state.done) {
         if (!positionLoaded || restored) return@LaunchedEffect
@@ -319,23 +350,21 @@ private fun ReaderContent(
 
         if (canRestore) {
             if (position != null) {
-                listState.scrollToItem(
-                    index = position.index.coerceIn(0, state.items.size),
-                    scrollOffset = position.offset,
-                )
+                val idx = position.index.coerceIn(0, state.items.size)
+                if (pagerMode) pagerState.scrollToPage(idx)
+                else listState.scrollToItem(index = idx, scrollOffset = position.offset)
             }
             restored = true
         }
     }
 
-    LaunchedEffect(chapterId, restored, state.done) {
+    LaunchedEffect(chapterId, restored, state.done, pagerMode) {
         if (!restored) return@LaunchedEffect
-
         snapshotFlow {
-            Triple(
-                listState.firstVisibleItemIndex,
-                listState.firstVisibleItemScrollOffset,
-                state.done && !listState.canScrollForward,
+            if (pagerMode) Triple(pagerState.currentPage, 0, state.done && pagerState.currentPage >= state.items.size)
+            else Triple(
+                listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset,
+                state.done && !listState.canScrollForward
             )
         }
             .distinctUntilChanged()
@@ -349,137 +378,162 @@ private fun ReaderContent(
             }
     }
 
-    Box(
-        Modifier.fillMaxSize().clipToBounds().then(
-            if (state.isManga) Modifier
-                .pointerInput(zoom) { detectTapGestures(onDoubleTap = { zoom.toggle() }) }
-                .zoomGestures(zoom, listMode = true)
-            else Modifier
+    var prevPagerMode by remember(chapterId) { mutableStateOf(pagerMode) }
+    LaunchedEffect(pagerMode) {
+        if (pagerMode == prevPagerMode) return@LaunchedEffect
+        if (restored) {
+            if (pagerMode) pagerState.scrollToPage(listState.firstVisibleItemIndex)
+            else listState.scrollToItem(pagerState.currentPage)
+        }
+        prevPagerMode = pagerMode
+    }
+
+    if (pagerMode) {
+        MangaPager(
+            state = state, pagerState = pagerState,
+            vertical = mangaMode == MANGA_PAGER_V,
+            prev = prev, next = next, onOpenChapter = onOpenChapter,
         )
-    ) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize().then(if (state.isManga) Modifier.zoomLayer(zoom) else Modifier),
-            contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(if (state.isManga) MANGA_PAGE_GAP else 14.dp),
+    } else {
+        Box(
+            Modifier.fillMaxSize().clipToBounds().then(
+                if (state.isManga) Modifier
+                    .pointerInput(zoom) { detectTapGestures(onDoubleTap = { zoom.toggle() }) }
+                    .zoomGestures(zoom, listMode = true)
+                else Modifier
+            )
         ) {
-            itemsIndexed(state.items) { index, item ->
-                when (item) {
-                    is ReaderItem.Paragraph -> Text(
-                        text = item.text,
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            fontSize = fontSize.sp,
-                            lineHeight = (fontSize * lineSpacing / 100f).sp,
-                            fontFamily = fontFamily,
-                        ),
-                        modifier = Modifier
-                            .padding(horizontal = sidePadding)
-                            .pointerInput(index) {
-                                awaitEachGesture {
-                                    val down = awaitFirstDown(requireUnconsumed = false)
-                                    val press = awaitLongPressOrCancellation(down.id)   // null: палец ушёл или это скролл
-                                    if (press != null) {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        longPress(index)
-                                        waitForUpOrCancellation()?.consume()        // отпускание не должно срабатывать как тап
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize().then(if (state.isManga) Modifier.zoomLayer(zoom) else Modifier),
+                contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(if (state.isManga) MANGA_PAGE_GAP else 14.dp),
+            ) {
+                itemsIndexed(state.items) { index, item ->
+                    when (item) {
+                        is ReaderItem.Paragraph -> Text(
+                            text = item.text,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontSize = fontSize.sp,
+                                lineHeight = (fontSize * lineSpacing / 100f).sp,
+                                fontFamily = fontFamily,
+                            ),
+                            modifier = Modifier
+                                .padding(horizontal = sidePadding)
+                                .pointerInput(index) {
+                                    awaitEachGesture {
+                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                        val press =
+                                            awaitLongPressOrCancellation(down.id)   // null: палец ушёл или это скролл
+                                        if (press != null) {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            longPress(index)
+                                            waitForUpOrCancellation()?.consume()        // отпускание не должно срабатывать как тап
+                                        }
                                     }
                                 }
-                            }
-                            .then(
-                                if (index in marked) Modifier
-                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
-                                    .padding(4.dp)
-                                else Modifier
-                            ),
-                    )
+                                .then(
+                                    if (index in marked) Modifier
+                                        .background(
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                            RoundedCornerShape(6.dp)
+                                        )
+                                        .padding(4.dp)
+                                    else Modifier
+                                ),
+                        )
 
-                    is ReaderItem.Header -> {
-                        val family = if (state.isManga) FontFamily.Default else fontFamily
-                        Column(
-                            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            Text(item.label, style = MaterialTheme.typography.titleLarge.copy(fontFamily = family))
-                            if (item.title.isNotBlank()) {
-                                Text(item.title, style = MaterialTheme.typography.titleMedium.copy(fontFamily = family))
+                        is ReaderItem.Header -> {
+                            val family = if (state.isManga) FontFamily.Default else fontFamily
+                            Column(
+                                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Text(item.label, style = MaterialTheme.typography.titleLarge.copy(fontFamily = family))
+                                if (item.title.isNotBlank()) {
+                                    Text(
+                                        item.title,
+                                        style = MaterialTheme.typography.titleMedium.copy(fontFamily = family)
+                                    )
+                                }
+                                if (item.date != null) {
+                                    Text(
+                                        "Опубликовано: ${item.date}",
+                                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = family),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                             }
-                            if (item.date != null) {
+                        }
+
+                        is ReaderItem.Picture -> Column(Modifier.padding(horizontal = if (state.isManga) 0.dp else 12.dp)) {
+                            AsyncImage(
+                                model = if (state.isManga) hiRes(item.file) else item.file,   // манга — в высоком разрешении
+                                contentDescription = item.caption.ifBlank { null },
+                                contentScale = ContentScale.FillWidth,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(item.aspect)
+                                    .clip(if (state.isManga) RectangleShape else MaterialTheme.shapes.medium)
+                                    .then(if (state.isManga) Modifier else Modifier.clickable { fullImage = item }),
+                            )
+                            if (item.caption.isNotBlank()) {
                                 Text(
-                                    "Опубликовано: ${item.date}",
-                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = family),
+                                    text = item.caption,
+                                    style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp, start = 8.dp, end = 8.dp),
                                 )
                             }
                         }
-                    }
 
-                    is ReaderItem.Picture -> Column(Modifier.padding(horizontal = if (state.isManga) 0.dp else 12.dp)) {
-                        AsyncImage(
-                            model = if (state.isManga) hiRes(item.file) else item.file,   // манга — в высоком разрешении
-                            contentDescription = item.caption.ifBlank { null },
-                            contentScale = ContentScale.FillWidth,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(item.aspect)
-                                .clip(if (state.isManga) RectangleShape else MaterialTheme.shapes.medium)
-                                .then(if (state.isManga) Modifier else Modifier.clickable { fullImage = item }),
+                        is ReaderItem.Missing -> Text(
+                            text = if (item.caption.isBlank()) "[иллюстрация недоступна]" else "[иллюстрация недоступна: ${item.caption}]",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = sidePadding),
                         )
-                        if (item.caption.isNotBlank()) {
-                            Text(
-                                text = item.caption,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth().padding(top = 6.dp, start = 8.dp, end = 8.dp),
-                            )
+                    }
+                }
+
+                item(key = "footer") {
+                    if (!state.done) {
+                        Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(modifier = Modifier.size(28.dp))
+                        }
+                    } else {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 24.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            OutlinedButton(
+                                onClick = { prev?.let(onOpenChapter) },
+                                enabled = prev != null,
+                                modifier = Modifier.weight(1f),
+                            ) { Text("‹ Предыдущая") }
+                            Button(
+                                onClick = { next?.let(onOpenChapter) },
+                                enabled = next != null,
+                                modifier = Modifier.weight(1f),
+                            ) { Text("Следующая ›") }
                         }
                     }
-
-                    is ReaderItem.Missing -> Text(
-                        text = if (item.caption.isBlank()) "[иллюстрация недоступна]" else "[иллюстрация недоступна: ${item.caption}]",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = sidePadding),
-                    )
                 }
             }
 
-            item(key = "footer") {
-                if (!state.done) {
-                    Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(modifier = Modifier.size(28.dp))
-                    }
-                } else {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 24.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        OutlinedButton(
-                            onClick = { prev?.let(onOpenChapter) },
-                            enabled = prev != null,
-                            modifier = Modifier.weight(1f),
-                        ) { Text("‹ Предыдущая") }
-                        Button(
-                            onClick = { next?.let(onOpenChapter) },
-                            enabled = next != null,
-                            modifier = Modifier.weight(1f),
-                        ) { Text("Следующая ›") }
-                    }
-                }
-            }
+            // Ползунок быстрой прокрутки у правого края: у манги — номер страницы, у ранобэ — проценты
+            FastScrollbar(
+                state = listState,
+                label = { index, total ->
+                    if (state.isManga) "${index.coerceIn(1, pages)} / $pages"   // индекс 0 — шапка
+                    else "${(index * 100f / (total - 1).coerceAtLeast(1)).roundToInt()}%"
+                },
+            )
+
+            fullImage?.let { FullImageDialog(it.file, it.caption) { fullImage = null } }
+
         }
-
-        // Ползунок быстрой прокрутки у правого края: у манги — номер страницы, у ранобэ — проценты
-        FastScrollbar(
-            state = listState,
-            label = { index, total ->
-                if (state.isManga) "${index.coerceIn(1, pages)} / $pages"   // индекс 0 — шапка
-                else "${(index * 100f / (total - 1).coerceAtLeast(1)).roundToInt()}%"
-            },
-        )
-
-        fullImage?.let { FullImageDialog(it.file, it.caption) { fullImage = null } }
-
     }
 }

@@ -18,6 +18,7 @@ const val TYPE_EPILOGUE = "epilogue"   // R01-E, номера нет
 const val TYPE_EXTRA = "extra"         // R01-A01… дополнительные главы вне рамок сюжета
 const val NOTICE_CHANGELOG = "changelog"
 const val NOTICE_IMPORTANT = "important"
+const val ROLE_USER = "user"
 
 /** Порядок внутри тома: пролог → главы → эпилог → экстра (так же сортирует сервер). */
 fun typeRank(type: String): Int = when (type) {
@@ -26,6 +27,7 @@ fun typeRank(type: String): Int = when (type) {
     TYPE_EXTRA -> 3
     else -> 1
 }
+
 
 /** Подпись для списков, шапки читалки и уведомлений. */
 fun chapterLabel(type: String, number: Int): String = when (type) {
@@ -58,17 +60,8 @@ data class Volume(
     val chapters: List<Chapter>,
 )
 
-data class ChatMessage(val id: Long, val name: String, val text: String, val created: Long)
 
 data class AppVersion(val latest: String, val url: String)
-
-data class AuthStart(val token: String, val url: String)
-
-sealed interface AuthPoll {
-    data object Pending : AuthPoll
-    data object Expired : AuthPoll
-    data class Ok(val session: String, val name: String) : AuthPoll
-}
 
 data class LatestChapter(
     val id: Int, val kind: String, val volume: Int, val number: Int, val title: String, val created: Long,
@@ -106,12 +99,6 @@ fun parseVolumes(kind: String, json: String): List<Volume> =
         )
     }
 
-fun parseChatMessage(json: String): ChatMessage = parseChatMessage(MiniJson.parse(json).obj())
-
-fun parseChatMessage(o: Map<String, Any?>): ChatMessage =
-    ChatMessage(id = o.long("id"), name = o.string("name"), text = o.string("text"), created = o.long("created"))
-
-fun parseChatHistory(json: String): List<ChatMessage> = MiniJson.parse(json).arr().map { parseChatMessage(it.obj()) }
 
 fun parseLatest(json: String): List<LatestChapter> = MiniJson.parse(json).arr().map {
     val o = it.obj()
@@ -130,3 +117,4 @@ fun parseNotices(json: String): NoticeBatch {
         },
     )
 }
+

@@ -22,8 +22,6 @@ MAX_UPLOAD_BYTES = int(float(os.environ.get("MAX_UPLOAD_MB", "300")) * 1024 * 10
 RULES = [
     ("POST", "/admin/login", 20, 300),
     ("POST", "/admin/settings", 10, 30),
-    ("POST", "/api/auth/start", 20, 600),
-    ("GET", "/api/auth/poll/", 150, 60),
     ("GET", "/api/chapters/", 60, 60),
     ("*", "/api/", 300, 60),
     ("*", "/static/", None, 0),
@@ -41,7 +39,7 @@ SECURITY_HEADERS = {
 if HTTPS_ONLY:
     SECURITY_HEADERS["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
-NO_STORE_PREFIXES = ("/admin", "/api/auth/", "/api/chat")  # ответы с личными данными не кэшируем
+NO_STORE_PREFIXES = ("/admin", )  # ответы с личными данными не кэшируем
 
 
 class RateLimiter:

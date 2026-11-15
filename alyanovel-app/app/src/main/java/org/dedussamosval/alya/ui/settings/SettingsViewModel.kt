@@ -53,7 +53,6 @@ class SettingsViewModel(private val c: AppContainer) : ViewModel() {
     }
 
     fun setNotifyChapters(v: Boolean) = launchSet { c.settings.set(Keys.NOTIFY_CHAPTERS, v) }
-    fun setNotifyChat(v: Boolean) = launchSet { c.settings.set(Keys.NOTIFY_CHAT, v) }
     fun setSaveOffline(v: Boolean) = launchSet { c.settings.set(Keys.SAVE_OFFLINE, v) }
     fun setWifiOnly(v: Boolean) = launchSet { c.settings.set(Keys.WIFI_ONLY, v) }
     fun setTheme(v: String) = launchSet { c.settings.set(Keys.THEME, v) }

@@ -29,17 +29,19 @@ private val Context.dataStore by preferencesDataStore(name = "settings")
 
 const val TOS_VERSION = "2026-11-04"
 
+const val MANGA_STRIP = "strip"      // лента сверху вниз (как сейчас)
+const val MANGA_PAGER_H = "pager_h"  // по одной, слева направо
+const val MANGA_PAGER_V = "pager_v"  // по одной, сверху вниз
+
 object Keys {
     val NOTIFY_CHAPTERS = booleanPreferencesKey("notify_chapters")
-    val NOTIFY_CHAT = booleanPreferencesKey("notify_chat")
     val SAVE_OFFLINE = booleanPreferencesKey("save_offline")
     val WIFI_ONLY = booleanPreferencesKey("wifi_only")
+    val MANGA_MODE = stringPreferencesKey("manga_mode")
     val THEME = stringPreferencesKey("theme")          // "system" | "light" | "dark"
     val FONT_SIZE = intPreferencesKey("font_size")     // sp, размер текста в читалке
     val FONT_FAMILY = stringPreferencesKey("font_family") // "sans" | "serif" | "mono"
     val LINE_SPACING = intPreferencesKey("line_spacing")  // межстрочный интервал в % от размера шрифта (120..200)
-    val SESSION = stringPreferencesKey("session")
-    val USER_NAME = stringPreferencesKey("user_name")
     val LAST_SEEN = longPreferencesKey("last_seen")    // unix-секунды: новее этого — «новая глава»
     val READ_IDS = stringSetPreferencesKey("read_ids")
     val TOS_ACCEPTED = stringPreferencesKey("tos_accepted") // редакция условий, которую принял пользователь
@@ -50,6 +52,7 @@ data class Prefs(
     val notifyChat: Boolean = true,
     val saveOffline: Boolean = true,
     val wifiOnly: Boolean = false,
+    val mangaMode: String = MANGA_STRIP,
     val theme: String = "system",
     val fontSize: Int = 17,
     val fontFamily: String = "sans",
@@ -73,15 +76,13 @@ class SettingsStore(private val context: Context) {
         .map { p ->
             Prefs(
                 notifyChapters = p[Keys.NOTIFY_CHAPTERS] ?: true,
-                notifyChat = p[Keys.NOTIFY_CHAT] ?: true,
                 saveOffline = p[Keys.SAVE_OFFLINE] ?: false,
                 wifiOnly = p[Keys.WIFI_ONLY] ?: false,
+                mangaMode = p[Keys.MANGA_MODE] ?: MANGA_STRIP,
                 theme = p[Keys.THEME] ?: "system",
                 fontSize = p[Keys.FONT_SIZE] ?: 17,
                 fontFamily = p[Keys.FONT_FAMILY] ?: "sans",
                 lineSpacing = p[Keys.LINE_SPACING] ?: 160,
-                session = p[Keys.SESSION] ?: "",
-                userName = p[Keys.USER_NAME] ?: "",
                 lastSeen = p[Keys.LAST_SEEN] ?: 0L,
                 readIds = (p[Keys.READ_IDS] ?: emptySet()).mapNotNull { it.toIntOrNull() }.toSet(),
                 tosAccepted = p[Keys.TOS_ACCEPTED] ?: "",
@@ -92,19 +93,6 @@ class SettingsStore(private val context: Context) {
         context.dataStore.edit { it[key] = value }
     }
 
-    suspend fun saveSession(session: String, name: String) {
-        context.dataStore.edit {
-            it[Keys.SESSION] = session
-            it[Keys.USER_NAME] = name
-        }
-    }
-
-    suspend fun clearSession() {
-        context.dataStore.edit {
-            it.remove(Keys.SESSION)
-            it.remove(Keys.USER_NAME)
-        }
-    }
 
     suspend fun markRead(chapterId: Int) {
         context.dataStore.edit {

@@ -204,6 +204,7 @@ export SECRET_KEY=$(python -c "import secrets; print(secrets.token_hex(32))")
 export HTTPS_ONLY=1
 
 uvicorn server.main:app --proxy-headers --forwarded-allow-ips 127.0.0.1 --host 127.0.0.1 --port 8000
+# при желании делать логи в файл - добавьте --log-config uvicorn_logger.yaml
 ```
 
 В Windows PowerShell переменные задаются так: `$env:BOT_TOKEN="..."`. Админ-панель: `https://ваш-домен/admin`.

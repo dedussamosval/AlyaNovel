@@ -136,6 +136,14 @@
         Опубликовать позже
       </label>
 
+      <div class="silent-option">
+      <label class="schedule-toggle" for="silent-toggle">
+        <input id="silent-toggle" type="checkbox" name="silent" value="1">
+        Сохранить без push-уведомления
+      </label>
+      <p class="hint">Глава появится в приложении, но пуш не уйдёт — в том числе при отложенной публикации.</p>
+    </div>
+
       <div id="schedule-fields" hidden>
         <label for="publish-at">Дата и время ({{ publish_tz }})</label>
         <input id="publish-at" name="publish_at" type="datetime-local" disabled>

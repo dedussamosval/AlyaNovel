@@ -133,6 +133,8 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 ```
+При желании, добавьте в ExecStart аргумент --log-config uvicorn_logger.yaml
+Это включит запись логов в файл
 
 ```bash
 sudo systemctl daemon-reload

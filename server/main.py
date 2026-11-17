@@ -312,8 +312,9 @@ def volume_delete(vid: int):
 @app.post("/admin/chapters", dependencies=[Depends(need_admin)])
 async def chapter_create(volume_id: int = Form(), number: str = Form(""), chapter_type: str = Form("chapter"),
                          title: str = Form(""), text: str = Form(""), direction: str = Form("rtl"),
-                         publish_at: str = Form(""), images: list[UploadFile] = File(default=[])):
-    ts = parse_publish_at(publish_at)   
+                         publish_at: str = Form(""), silent: str = Form(""), images: list[UploadFile] = File(default=[])):
+    ts = parse_publish_at(publish_at)
+    quiet = bool(silent)   
     with db.conn() as c:
         vol = c.execute("SELECT * FROM volumes WHERE id=?", (volume_id,)).fetchone()
     if not vol:
@@ -345,14 +346,16 @@ async def chapter_create(volume_id: int = Form(), number: str = Form(""), chapte
             "ON CONFLICT(volume_id, type, number) DO UPDATE SET title=excluded.title, fmt=excluded.fmt, "
             "path=excluded.path, size=excluded.size, "
             "created=CASE WHEN excluded.publish_at IS NOT NULL AND notified=0 THEN excluded.publish_at ELSE created END, "
-            "publish_at=COALESCE(excluded.publish_at, publish_at)",
+            "publish_at=COALESCE(excluded.publish_at, publish_at), "
+            "notified=CASE WHEN ? THEN 1 ELSE notified END",
             (volume_id, chapter_type, number, title, fmt, new_path, len(blob),
-             ts or db.now(), ts, 0 if (ts and not old) else 1))
+             ts or db.now(), ts, 1 if quiet else (0 if (ts and not old) else 1),
+             1 if quiet else 0))
         saved = c.execute("SELECT id, created FROM chapters WHERE volume_id=? AND type=? AND number=?",
                           (volume_id, chapter_type, number)).fetchone()
     if old and old["path"] != new_path:  # главу заменили — старый файл больше не нужен
         db.delete_chapter_files([old["path"]])
-    elif push.enabled() and not ts:  # новая глава и без отложенной публикации — мгновенное уведомление всем подписанным устройствам (в фоне)
+    elif push.enabled() and not ts and not quiet:  # новая глава, без отложенной публикации — мгновенное уведомление всем подписанным устройствам (в фоне), если не задан параметр тихой публикации
         push.fire_and_forget(push.notify_new_chapter(
             chapter_id=saved["id"], kind=vol["kind"], volume=vol["number"], number=number,
             title=title, created=saved["created"], chapter_type=chapter_type))

@@ -350,7 +350,7 @@ async def chapter_create(volume_id: int = Form(), number: str = Form(""), chapte
              ts or db.now(), ts, 0 if (ts and not old) else 1))
         saved = c.execute("SELECT id, created FROM chapters WHERE volume_id=? AND type=? AND number=?",
                           (volume_id, chapter_type, number)).fetchone()
-    if old:  # главу заменили — старый файл больше не нужен
+    if old and old["path"] != new_path:  # главу заменили — старый файл больше не нужен
         db.delete_chapter_files([old["path"]])
     elif push.enabled() and not ts:  # новая глава и без отложенной публикации — мгновенное уведомление всем подписанным устройствам (в фоне)
         push.fire_and_forget(push.notify_new_chapter(

@@ -2,8 +2,6 @@
 
 ## 1. Админ-панель
 
-Адрес: https://ваш-домен/admin
-
 Что делать:
 - Войти под логином и паролем админа.
 - Не передавать логин/пароль другим.
@@ -57,7 +55,9 @@
 
 ### 1) Подготовить VPS
 ```bash
-sudo apt update                                      # обновить пакеты Ubuntu
+sudo apt update 
+# обновить пакеты Ubuntu
+
 sudo apt install -y git python3 python3-venv python3-pip nginx certbot python3-certbot-nginx
 # установить: git, Python, виртуальное окружение, pip, Nginx, Certbot
 
@@ -88,10 +88,10 @@ sudo -u alya nano /opt/alyanovel/.env
 SECRET_KEY=ВАШ_СЛУЧАЙНЫЙ_КЛЮЧ
 HTTPS_ONLY=1
 PUBLIC_URL=https://example.com
+APK_PATH=opt/alyanovel/server/storage/download
 DB_PATH=/opt/alyanovel/server/alyanovel.db
-STORAGE_DIR=/opt/alyanovel/storage/chapters
-BOT_TOKEN=TOKEN_FROM_BOTFATHER
-BOT_USERNAME=my_bot
+STORAGE_DIR=/opt/alyanovel/server/storage/chapters
+FCM_SERVICE_ACCOUNT=/opt/alyanovel/server/storage/firebase-secret.json
 ```
 ```bash
 sudo chmod 600 /opt/alyanovel/.env
@@ -126,7 +126,7 @@ User=alya
 Group=alya
 WorkingDirectory=/opt/alyanovel
 EnvironmentFile=/opt/alyanovel/.env
-ExecStart=/opt/alyanovel/.venv/bin/uvicorn server.main:app --proxy-headers --forwarded-allow-ips 127.0.0.1 --host 127.0.0.1 --port 8000
+ExecStart=/opt/alyanovel/.venv/bin/uvicorn server.main:app --proxy-headers --forwarded-allow-ips 127.0.0.1 --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=5
 
@@ -159,17 +159,11 @@ sudo nano /etc/nginx/sites-available/alyanovel
 ```nginx
 server {
     listen 80;
-    server_name example.com;
+    server_name example.com www.example.com;
     client_max_body_size 300m;
 
-    location /ws/ {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+    location ^~ /static/ {
+	    alias /opt/alyanovel/server/static/;
     }
 
     location / {

@@ -27,6 +27,10 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.isSpecified
+import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.size.Dimension
@@ -41,15 +45,47 @@ class ZoomState(private val maxScale: Float = 5f) {
     var offsetX by mutableFloatStateOf(0f); private set
     var offsetY by mutableFloatStateOf(0f); private set
 
-    fun transform(zoom: Float, panX: Float, panY: Float, w: Int, h: Int, lockY: Boolean) {
-        scale = (scale * zoom).coerceIn(1f, maxScale)
-        val mx = w * (scale - 1f) / 2f
-        val my = h * (scale - 1f) / 2f
-        offsetX = (offsetX + panX).coerceIn(-mx, mx)
-        offsetY = if (lockY) 0f else (offsetY + panY).coerceIn(-my, my)
+    /** Лента манги: прокрутить список на delta px, чтобы точка под пальцем осталась на месте. */
+    var scrollBy: ((Float) -> Unit)? = null
+
+    /** Зум в точке (fx, fy) — координаты контейнера без трансформации. */
+    fun zoomAt(factor: Float, fx: Float, fy: Float, w: Int, h: Int, listMode: Boolean) {
+        val s0 = scale
+        val s1 = (s0 * factor).coerceIn(1f, maxScale)
+        if (s1 == s0) return
+        val cx = w / 2f
+        val px = cx + (fx - cx - offsetX) / s0          // точка контента под пальцем
+        scale = s1
+        val mx = w * (s1 - 1f) / 2f
+        offsetX = (fx - cx - (px - cx) * s1).coerceIn(-mx, mx)
+        if (listMode) {
+            // окно списка = H/scale от верха: сдвигаем его, чтобы fy указывал на тот же контент
+            scrollBy?.invoke(fy / s0 - fy / s1)
+            offsetY = 0f
+        } else {
+            val cy = h / 2f
+            val py = cy + (fy - cy - offsetY) / s0
+            val my = h * (s1 - 1f) / 2f
+            offsetY = (fy - cy - (py - cy) * s1).coerceIn(-my, my)
+        }
     }
 
-    fun toggle() { if (scale > 1f) { scale = 1f; offsetX = 0f; offsetY = 0f } else scale = 2.5f }
+    fun pan(dx: Float, dy: Float, w: Int, h: Int, listMode: Boolean, scrollList: Boolean = false) {
+        val mx = w * (scale - 1f) / 2f
+        offsetX = (offsetX + dx).coerceIn(-mx, mx)
+        if (listMode) {
+            if (scrollList) scrollBy?.invoke(-dy / scale)
+        } else {
+            val my = h * (scale - 1f) / 2f
+            offsetY = (offsetY + dy).coerceIn(-my, my)
+        }
+    }
+
+    // Двойной тап: приблизить в точке тапа / вернуть 1×.
+    fun toggleAt(fx: Float, fy: Float, w: Int, h: Int, listMode: Boolean) {
+        val target = if (scale > 1f) 1f else 2.5f
+        zoomAt(target / scale, fx, fy, w, h, listMode)
+    }
 }
 
 /**
@@ -58,25 +94,61 @@ class ZoomState(private val maxScale: Float = 5f) {
  */
 fun Modifier.zoomGestures(state: ZoomState, listMode: Boolean): Modifier =
     pointerInput(state, listMode) {
+        var lastTapTime = 0L
+        var lastTapPos = Offset.Zero
+        val maxTapDistance = 100.dp.toPx()
+
         awaitEachGesture {
-            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            var moved = Offset.Zero
+            var tapCandidate = true
+            var lastTime = down.uptimeMillis
+
             do {
                 val e = awaitPointerEvent(PointerEventPass.Initial)
+                lastTime = e.changes.maxOf { it.uptimeMillis }
                 val pan = e.calculatePan()
                 val multi = e.changes.count { it.pressed } > 1
-                when {
-                    multi -> {
-                        state.transform(e.calculateZoom(), pan.x, pan.y, size.width, size.height, lockY = listMode)
-                        e.changes.forEach { if (it.positionChanged()) it.consume() }
+
+                if (multi) {
+                    tapCandidate = false
+                    // Масштабируем вокруг центра пальцев на ПРОШЛОМ событии, затем сдвигаем на смещение центра:
+                    // так точка контента, которую вы держите пальцами, остаётся под ними.
+                    val prevCentroid = e.calculateCentroid(useCurrent = false)
+                    val z = e.calculateZoom()
+                    if (prevCentroid.isSpecified && z != 1f) {
+                        state.zoomAt(z, prevCentroid.x, prevCentroid.y, size.width, size.height, listMode)
                     }
-                    state.scale > 1f && !listMode -> {
-                        state.transform(1f, pan.x, pan.y, size.width, size.height, lockY = false)
-                        e.changes.forEach { if (it.positionChanged()) it.consume() }   // не гасим тапы — иначе не будет двойного тапа
+                    state.pan(pan.x, pan.y, size.width, size.height, listMode, scrollList = true)
+                    e.changes.forEach { if (it.positionChanged()) it.consume() }
+                } else {
+                    moved += pan
+                    if (moved.getDistance() > viewConfiguration.touchSlop) tapCandidate = false
+                    if (!tapCandidate) {
+                        when {
+                            state.scale > 1f && !listMode -> {
+                                state.pan(pan.x, pan.y, size.width, size.height, listMode = false)
+                                e.changes.forEach { if (it.positionChanged()) it.consume() }
+                            }
+                            state.scale > 1f && abs(pan.x) > abs(pan.y) ->
+                                state.pan(pan.x, 0f, size.width, size.height, listMode = true)
+                        }
                     }
-                    state.scale > 1f && abs(pan.x) > abs(pan.y) ->
-                        state.transform(1f, pan.x, 0f, size.width, size.height, lockY = true)
                 }
             } while (e.changes.any { it.pressed })
+
+            // Жест закончился: был ли это тап, и второй ли подряд
+            if (tapCandidate && lastTime - down.uptimeMillis < viewConfiguration.longPressTimeoutMillis) {
+                val isDouble = lastTime - lastTapTime <= viewConfiguration.doubleTapTimeoutMillis &&
+                        (down.position - lastTapPos).getDistance() < maxTapDistance
+                if (isDouble) {
+                    state.toggleAt(down.position.x, down.position.y, size.width, size.height, listMode)
+                    lastTapTime = 0L
+                } else {
+                    lastTapTime = lastTime
+                    lastTapPos = down.position
+                }
+            }
         }
     }
 
@@ -116,7 +188,6 @@ fun FullImageDialog(file: File, caption: String, onDismiss: () -> Unit) {
                 contentDescription = caption.ifBlank { null },
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize()
-                    .pointerInput(Unit) { detectTapGestures(onDoubleTap = { zoom.toggle() }) }
                     .zoomGestures(zoom, listMode = false)
                     .graphicsLayer {
                         scaleX = zoom.scale; scaleY = zoom.scale

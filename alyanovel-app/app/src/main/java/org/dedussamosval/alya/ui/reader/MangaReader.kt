@@ -1,7 +1,6 @@
 package org.dedussamosval.alya.ui.reader
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
@@ -17,41 +16,18 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import coil.compose.AsyncImage
-import org.dedussamosval.alya.data.MANGA_PAGER_H
-import org.dedussamosval.alya.data.MANGA_PAGER_V
-import org.dedussamosval.alya.data.MANGA_STRIP
-import org.dedussamosval.alya.ui.components.PillToggle
-
-private val MODE_KEYS = listOf(MANGA_STRIP, MANGA_PAGER_H, MANGA_PAGER_V)
-private val MODE_LABELS = listOf("Лентой", "По одной →", "По одной ↓")
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun MangaSettingsSheet(mode: String, onMode: (String) -> Unit, onDismiss: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp).navigationBarsPadding(),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Text("Режим чтения", style = MaterialTheme.typography.titleLarge)
-            PillToggle(
-                options = MODE_LABELS,
-                selected = MODE_KEYS.indexOf(mode).coerceAtLeast(0),
-                onSelect = { onMode(MODE_KEYS[it]) },
-            )
-            Text(
-                when (mode) {
-                    MANGA_PAGER_H -> "Страницы листаются свайпом влево и вправо, по одной на экран."
-                    MANGA_PAGER_V -> "Страницы листаются свайпом вверх и вниз, по одной на экран."
-                    else -> "Все страницы идут сплошной лентой."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 /** Режимы «по одной». Индексы страниц те же, что у LazyColumn: 0 — шапка, 1..N — страницы, N+1 — футер. */
 @Composable
@@ -62,6 +38,8 @@ fun MangaPager(
     prev: Int?, next: Int?, onOpenChapter: (Int) -> Unit,
 ) {
     val pages = (state.items.size - 1).coerceAtLeast(1)
+    val scope = rememberCoroutineScope()
+    var showJump by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
         val content: @Composable (Int) -> Unit = { index ->
             when (val item = state.items.getOrNull(index)) {
@@ -92,6 +70,8 @@ fun MangaPager(
         else HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { content(it) }
 
         Surface(
+            onClick = { showJump = true },
+            enabled = pages > 1,
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
             shape = MaterialTheme.shapes.large,
             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
@@ -102,7 +82,55 @@ fun MangaPager(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
             )
         }
+
+        if (showJump) {
+            PageJumpDialog(
+                current = pagerState.currentPage.coerceIn(1, pages),
+                pages = pages,
+                onJump = { page ->
+                    showJump = false
+                    scope.launch { pagerState.scrollToPage(page) }   // индекс пейджера = номер страницы (0 — шапка)
+                },
+                onDismiss = { showJump = false },
+            )
+        }
     }
+}
+
+@Composable
+private fun PageJumpDialog(current: Int, pages: Int, onJump: (Int) -> Unit, onDismiss: () -> Unit) {
+    var page by remember { mutableIntStateOf(current) }
+    var text by remember { mutableStateOf(current.toString()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Перейти к странице") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { t ->
+                        val digits = t.filter(Char::isDigit).take(4)
+                        text = digits
+                        digits.toIntOrNull()?.let { page = it.coerceIn(1, pages) }
+                    },
+                    singleLine = true,
+                    label = { Text("Страница (1–$pages)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Go),
+                    keyboardActions = KeyboardActions(onGo = { onJump(page) }),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Slider(
+                    value = page.toFloat(),
+                    onValueChange = { page = it.roundToInt(); text = page.toString() },
+                    valueRange = 1f..pages.toFloat(),
+                    steps = (pages - 2).coerceAtLeast(0),
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onJump(page) }) { Text("Перейти") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+    )
 }
 
 @Composable
@@ -114,7 +142,6 @@ private fun ZoomablePage(item: ReaderItem.Picture) {
             contentDescription = null,
             contentScale = ContentScale.Fit,
             modifier = Modifier.fillMaxSize()
-                .pointerInput(zoom) { detectTapGestures(onDoubleTap = { zoom.toggle() }) }
                 .zoomGestures(zoom, listMode = false)   // при scale == 1 одиночный палец не потребляется, пейджер листает
                 .graphicsLayer {
                     scaleX = zoom.scale; scaleY = zoom.scale

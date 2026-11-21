@@ -1,8 +1,14 @@
 <resources>
     <!-- Системная тема только для фона до появления Compose (цвета как на сайте). Весь UI рисует Compose. -->
-    <style name="Theme.MangaForum" parent="android:Theme.Material.Light.NoActionBar">
+    <style name="Theme.AlyaNovel.Main" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/site_bg</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+    <!-- Тема сплэша при запуске приложения, до загрузки главного меню -->
+    <style name="Theme.AlyaNovel.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_bg</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_icon_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.AlyaNovel.Main</item>
     </style>
 </resources>

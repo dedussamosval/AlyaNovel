@@ -13,7 +13,7 @@ fun quoted(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\
 val serverUrl = (project.findProperty("serverUrl") as String?) ?: "https://alyanovel.ru"
 val debugServerUrl = (project.findProperty("debugServerUrl") as String?) ?: serverUrl
 
-val appVersionName = "0.2.15"
+val appVersionName = "0.3.0"
 
 base {
     archivesName.set("alyanovel-v.$appVersionName")
@@ -28,7 +28,7 @@ android {
         minSdk = 26
         //noinspection EditedTargetSdkVersion
         targetSdk = 37
-        versionCode = 14
+        versionCode = 15
         versionName = appVersionName
         buildConfigField("String", "SERVER_URL", quoted(serverUrl))
     }
@@ -87,6 +87,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
+    implementation(libs.androidx.core.splashscreen)
 
     debugImplementation(libs.compose.ui.tooling)
 

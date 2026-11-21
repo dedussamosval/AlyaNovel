@@ -102,9 +102,11 @@
 
 .chapter-row {
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .chapter-row > span {
+  flex: 1 1 220px;
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -283,7 +285,7 @@
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
 }
 
 .row-actions form {
@@ -317,4 +319,15 @@
 
 .silent-option {
   margin-top: 14px;
+}
+
+@media (max-width: 560px) {
+  .chapter-row > span {
+    flex-basis: 100%;
+  }
+
+  .row-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
 }

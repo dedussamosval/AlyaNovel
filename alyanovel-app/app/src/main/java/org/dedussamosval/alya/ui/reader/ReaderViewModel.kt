@@ -67,7 +67,7 @@ class ReaderViewModel(private val c: AppContainer, private val chapterId: Int) :
     }
 
     private val dateFormat = DateTimeFormatter
-        .ofPattern("d MMMM yyyy, HH:mm", Locale("ru"))
+        .ofPattern("d MMMM yyyy, HH:mm", Locale.forLanguageTag("ru"))
         .withZone(ZoneId.systemDefault())   // перевод в часовой пояс телефона
 
     private fun headerOf(ch: Chapter) = ReaderItem.Header(

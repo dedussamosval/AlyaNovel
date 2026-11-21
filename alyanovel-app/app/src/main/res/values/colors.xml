@@ -1,4 +1,5 @@
 <resources>
     <color name="site_bg">#F6F7FB</color>
+    <color name="splash_bg">#14141C</color>
     <color name="ic_launcher_background">#5B5BF0</color>
 </resources>

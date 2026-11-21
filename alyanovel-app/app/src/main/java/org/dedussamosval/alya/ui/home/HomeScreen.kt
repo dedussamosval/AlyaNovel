@@ -26,6 +26,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -33,6 +35,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,6 +64,7 @@ fun HomeScreen(listState: LazyListState, onOpenChapter: (Int) -> Unit, snackbar:
     var expandedVolumeIds by rememberSaveable(ui.kind) {
         mutableStateOf(emptySet<Int>())
     }
+    var deleteTarget by remember { mutableStateOf<Chapter?>(null) }
 
     LaunchedEffect(vm) { vm.messages.collect { snackbar.showSnackbar(it) } }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refreshDownloaded() }
@@ -134,10 +138,30 @@ fun HomeScreen(listState: LazyListState, onOpenChapter: (Int) -> Unit, snackbar:
                         },
                         onOpen = onOpenChapter,
                         onDownload = { vm.download(it) },
+                        onDeleteDownloaded = { deleteTarget = it },
                     )
                 }
             }
         }
+    }
+    deleteTarget?.let { ch ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("Удалить с устройства?") },
+            text = {
+                Text(
+                    buildString {
+                        append(ch.label)
+                        if (ch.title.isNotBlank()) append(" · ${ch.title}")
+                        append(" будет удалена из загрузок. Её можно скачать снова.")
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.deleteDownloaded(ch); deleteTarget = null }) { Text("Удалить") }
+            },
+            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("Отмена") } },
+        )
     }
 }
 
@@ -149,6 +173,7 @@ private fun VolumeCard(
     onToggle: () -> Unit,
     onOpen: (Int) -> Unit,
     onDownload: (Chapter) -> Unit,
+    onDeleteDownloaded: (Chapter) -> Unit,
 ) {
     SiteCard {
         Row(
@@ -204,6 +229,7 @@ private fun VolumeCard(
                     progress = ui.progress[ch.id],
                     onOpen = { onOpen(ch.id) },
                     onDownload = { onDownload(ch) },
+                    onDeleteDownloaded = { onDeleteDownloaded(ch) },
                 )
             }
         }
@@ -218,6 +244,7 @@ private fun ChapterRow(
     progress: Float?,
     onOpen: () -> Unit,
     onDownload: () -> Unit,
+    onDeleteDownloaded: () -> Unit
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Row(
@@ -241,10 +268,10 @@ private fun ChapterRow(
             progress != null -> Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(progress = { progress }, modifier = Modifier.size(22.dp), strokeWidth = 2.5.dp)
             }
-            downloaded -> Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+            downloaded -> IconButton(onClick = onDeleteDownloaded) {
                 Icon(
                     Icons.Rounded.DownloadDone,
-                    contentDescription = "Скачано",
+                    contentDescription = "Скачано — нажмите, чтобы удалить",
                     tint = MaterialTheme.colorScheme.primary,
                 )
             }

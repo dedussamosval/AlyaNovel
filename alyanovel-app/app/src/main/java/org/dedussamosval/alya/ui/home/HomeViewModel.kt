@@ -122,6 +122,14 @@ class HomeViewModel(private val c: AppContainer) : ViewModel() {
         }
     }
 
+    fun deleteDownloaded(ch: Chapter) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { c.chapters.delete(ch) }
+            state.update { it.copy(downloaded = it.downloaded - ch.id) }
+            _messages.tryEmit("Глава удалена с устройства")
+        }
+    }
+
     private fun setProgress(id: Int, p: Float) {
         state.update { it.copy(progress = it.progress + (id to p)) }
     }

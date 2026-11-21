@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/header.svg" alt="AlyaNovel — Python 3.13 · Kotlin · версия 0.2.15 width="880">
+  <img src="docs/header.svg" alt="AlyaNovel — Python 3.13 · Kotlin · версия 0.3.0 width="880">
 </p>
 
 <p align="center">
@@ -51,7 +51,7 @@
 
 Нужен Android 8.0 или новее. Обновления: **Настройки → О приложении → Проверить обновления**.
 
-> Версия **0.2.15** — ранняя: возможны ошибки. О проблемах и идеях пишите в чат канала.
+> Версия **0.3.0** — ранняя: возможны ошибки. О проблемах и идеях пишите в чат канала.
 
 ## Частые вопросы
 
@@ -198,8 +198,6 @@ pip install -r requirements.txt
 
 python -m server.db create-admin admin "сильный-пароль"
 
-export BOT_TOKEN=...
-export BOT_USERNAME=my_bot
 export SECRET_KEY=$(python -c "import secrets; print(secrets.token_hex(32))")
 export HTTPS_ONLY=1
 
@@ -207,7 +205,7 @@ uvicorn server.main:app --proxy-headers --forwarded-allow-ips 127.0.0.1 --host 1
 # при желании делать логи в файл - добавьте --log-config uvicorn_logger.yaml
 ```
 
-В Windows PowerShell переменные задаются так: `$env:BOT_TOKEN="..."`. Админ-панель: `https://ваш-домен/admin`.
+В Windows PowerShell переменные задаются так: `$env:SECRET_KEY="..."`. Админ-панель: `https://ваш-домен/admin`.
 
 Перед `uvicorn` нужен reverse proxy с HTTPS. Пример для Caddy (WebSocket работает «из коробки»):
 
@@ -239,7 +237,7 @@ alya.example.com {
 
 Если `OUTBOUND_PROXY` не задана, сервер может использовать системные настройки прокси или переменные `HTTPS_PROXY`, `HTTP_PROXY` и `ALL_PROXY`. Для SOCKS-прокси нужен пакет `httpx[socks]`.
 
-**Обязательные настройки для публичного сервера:** собственный `SECRET_KEY` и HTTPS с `HTTPS_ONLY=1`. `BOT_TOKEN` нужен только для входа через Telegram; настройки `FCM_*` — только для мгновенных push-уведомлений.
+**Обязательные настройки для публичного сервера:** собственный `SECRET_KEY` и HTTPS с `HTTPS_ONLY=1`. Настройки `FCM_*` — только для мгновенных push-уведомлений.
 
 **Мгновенные push (необязательно).** Создайте проект в [Firebase Console](https://console.firebase.google.com), добавьте Android-приложение с пакетом `org.dedussamosval.alya`,
 положите `google-services.json` в `alyanovel-app/app/`; в Project settings → Service accounts создайте приватный ключ, положите JSON на сервер и задайте `FCM_SERVICE_ACCOUNT`.
@@ -280,7 +278,7 @@ requirements.txt    зависимости Python
 
 | Что | Версия |
 |---|---|
-| Приложение | 0.2.15 |
+| Приложение | 0.3.0 |
 | Формат `.mtx` | 4 (читаются 1 - 3) |
 | Формат `.mpx` | 1 |
 | Python / Kotlin | 3.13 / 2.4 |

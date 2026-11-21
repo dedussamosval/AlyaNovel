@@ -30,8 +30,6 @@ from server import push  # noqa: E402
 from server import security # noqa: E402
 
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
-BOT_USERNAME = os.environ.get("BOT_USERNAME", "your_bot")
 SECRET_KEY = os.environ.get("SECRET_KEY", "change-me")
 APP_VERSION = os.environ.get("APP_LATEST_VERSION", "0.1.0")
 APP_DOWNLOAD_URL = os.environ.get("APP_DOWNLOAD_URL", "")
